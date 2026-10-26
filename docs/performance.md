@@ -69,7 +69,7 @@ Reported scopes:
 | --- | --- |
 | `main.physics`, `main.process` | `main.gd`'s physics and idle ticks. |
 | `player.slide`, `player.cover`, `player.combat`, `player.loot` | The parts of the player's tick: the body step, cover, combat, and the loot and footfall pass. |
-| `rig` | The ranger rig's animation sampling. |
+| `rig`, `rig.pose` | The ranger rig's animation sampling, and the pose application inside it. |
 | `mob.ai`, `legacy.ai`, `clone.ai` | One tick of each mob family's brain. |
 | `mob.senses`, `mob.state`, `mob.separate`, `mob.drive`, `mob.slide`, `mob.steer`, `mob.visual` | The parts of that tick: sight, the state machine, spacing, steering, the ground step and presentation. |
 | `mob.anim` | A mob's presentation sampler. |
@@ -265,6 +265,15 @@ percent of the frame, to fade things that take a minute to fade. It runs ten
 times a second now, with the elapsed time handed in — 0.020 ms. `advance` is
 still public and still takes a delta, so the regression that walks a stain from
 birth to its five-minute pool is unchanged.
+
+### The player side, priced
+
+The ranger's own frame work, scoped: the player tick 0.146 ms (of which the
+body step is 0.077 and cover, combat and loot a hundredth between them), its
+pose application 0.094, the HUD 0.063 and the camera 0.032. The pose is 93% of
+the rig cost and is pure skeletal work on a sixty-five-bone character with foot
+and weapon IK — the one thing in the frame that cannot be made periodic, since
+it is the character the player is always looking at.
 
 ### The status block runs at thirty hertz
 

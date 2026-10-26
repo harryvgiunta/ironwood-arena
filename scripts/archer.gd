@@ -1877,7 +1877,15 @@ func _locomotion_clip(speed: float) -> String:
 func _locomotion_clip_time(clip: String) -> float:
 	return _locomotion_phase*_player.get_animation(clip).length
 
+## Balanced regardless of the body's early returns, so the profiler cannot be
+## thrown out of step by a pose that bails.
 func _update_pose(delta: float) -> void:
+	Perf.begin("rig.pose")
+	_update_pose_body(delta)
+	Perf.end()
+
+
+func _update_pose_body(delta: float) -> void:
 	if not _built:
 		return
 	_step_facing_hold = maxf(0.0,_step_facing_hold-delta)
