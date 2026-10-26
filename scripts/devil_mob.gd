@@ -161,6 +161,11 @@ var _push_at := -100
 var _push_phase := 0
 ## This mob's think rate: the stride it runs at and the offset that keeps it
 ## from lining up with its neighbours.
+## Set by the scene that owns the slot: true when no ranger is near enough for
+## anything this body does to be seen. A mob's own distance check costs about
+## six microseconds a frame, more than the work it is choosing to skip, so the
+## scene does it once for all of them and the body just reads a bool.
+var skip_tick := false
 var _lod_stride := 1
 var _lod_phase := 0
 ## Whether the rig is currently being animated and drawn.
@@ -241,6 +246,8 @@ func _visual_script():
 
 
 func _physics_process(delta: float) -> void:
+	if skip_tick:
+		return
 	if replica:
 		# A replica still owns its presentation: on a client it is the only
 		# thing drawing the mob, so it wants the same distance culling and the

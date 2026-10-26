@@ -455,5 +455,21 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 			"a released devil rebuilds its rig when it comes back into range")
 		check(returning.get("_visual").get_clip_name() != "",
 			"the rebuilt rig is playing a clip")
+		check(not bool(returning.get("skip_tick")),
+			"a devil back in relevance resumes its tick")
+	# Distant bodies are not ticked at all; the scene decides that, not the body,
+	# because the check used to cost more than the work it skipped.
+	var culled := []
+	for devil in devils:
+		if is_instance_valid(devil) and bool(devil.get("skip_tick")):
+			culled.append(devil)
+	check(culled.size() > 0, "distant devils stop ticking")
+	if not culled.is_empty():
+		var woken = culled[0]
+		woken.global_position = frontier.player.global_position + Vector3(-5.0, 0.0, 3.0)
+		for frame in 20:
+			await physics_frame
+		check(not bool(woken.get("skip_tick")),
+			"a culled devil resumes when a ranger comes near")
 	frontier.queue_free()
 	await process_frame

@@ -75,6 +75,11 @@ var rig
 var combat
 var dodge
 var _ground: MobGround = MobGround.new()
+## Set by the scene that owns the slot: true when no ranger is near enough for
+## anything this body does to be seen. A mob's own distance check costs about
+## six microseconds a frame, more than the work it is choosing to skip, so the
+## scene does it once for all of them and the body just reads a bool.
+var skip_tick := false
 var _lod_stride := 1
 var _lod_phase := 0
 var _presenting := true
@@ -290,6 +295,8 @@ func _tint_rig() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if skip_tick:
+		return
 	if not alive:
 		if authoritative and not replica:
 			CorpsePhysics.settle_root(self, delta)

@@ -149,6 +149,21 @@ Spacing is a soft constraint on top of that: it is re-measured one frame in six
 and the result reused, staggered per mob so a hundred bodies do not all measure
 on the same frame.
 
+### Bodies nobody can see are not ticked
+
+A mob's own tick costs it about six microseconds a frame before it decides
+there is nothing to do: the distance test, the stride, the presentation pass.
+Doing that seventy-five times a second to learn that nothing is happening is
+the definition of waste, so the scene answers the question once for all of
+them — four times a second, because a ranger closing at a sprint has more than
+a second of margin against a threshold twelve metres beyond the rig-release
+range — and each body reads one boolean at the top of its tick.
+
+In the shipped frontier that skips **38 of 75 bodies entirely**. A culled body
+keeps its node, its collision shape and its snapshot slot; it just stops
+thinking, moving and presenting until a ranger is within seventy metres again.
+Corpses are never culled, so they still fall and hold.
+
 ### The rigs are culled and slowed with distance
 
 Past 45 m a mob's body stops drawing and its clip stops writing bone tracks;
@@ -289,8 +304,8 @@ between 2.00 and 2.50 ms across runs.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 1.85 ms | −80% |
-| Headless, 175 mobs fighting | 36.13 ms | 7.51 ms | −79% |
+| Headless, frontier idle | 9.14 ms | 1.77 ms | −81% |
+| Headless, 175 mobs fighting | 36.13 ms | 7.47 ms | −79% |
 | Windowed (GTX 1080), frontier idle | 19.14 ms | 6.37 ms | −67% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
@@ -330,9 +345,9 @@ three:
 
 | | ms | share |
 | --- | --- | --- |
-| World, ranger and loop, no mobs (`--nomobs`) | 0.75 | 41% |
-| The seventy-five mobs | 1.10 | 59% |
-| **Total** | **1.85** | |
+| World, ranger and loop, no mobs (`--nomobs`) | 0.75 | 42% |
+| The seventy-five mobs | 1.02 | 58% |
+| **Total** | **1.77** | |
 
 Per body that is **14.7 µs a frame**, of which the scoped runs attribute about
 3.5 µs to the mob's own script (state machines, sight, spacing, the per-frame

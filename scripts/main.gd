@@ -698,6 +698,7 @@ func _physics_process(delta: float) -> void:
 	if _entering_scene:
 		Perf.end()
 		return
+	_step_mob_culling()
 	if network_role == "host":
 		_host_network_step(delta)
 	Perf.end()
@@ -3046,3 +3047,18 @@ func _warm_mob_blood() -> void:
 	if is_instance_valid(archer):
 		BloodSurface.body_for(archer)
 	Perf.end()
+
+
+## Tells every body whether anything can see it. A mob far from every ranger has
+## nothing to decide, animate or present; its own tick would spend six
+## microseconds working that out, so the scene answers once for all of them and
+## the body reads one field. Corpses keep ticking so they still fall and hold.
+func _step_mob_culling() -> void:
+	# Four times a second is plenty: the cull threshold sits twelve metres
+	# beyond the rig-release range, so a ranger closing at a sprint has more
+	# than a second of margin before a skipped body would need presenting.
+	if Engine.get_physics_frames() % 15 != 0:
+		return
+	for enemy in _enemies_by_index:
+		if is_instance_valid(enemy):
+			enemy.skip_tick = not _enemy_relevant(enemy) and bool(enemy.get("alive")) != false
