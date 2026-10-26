@@ -203,6 +203,14 @@ them stalled on every new attacker. Three changes:
 The first bleed of each species still pays for its own measurement; every body
 after it does not.
 
+### The status block runs at thirty hertz
+
+`hud.update_status` rewrites six formatted strings and three meters every
+frame — 0.11 ms, more than five percent of the frontier — to show numbers a
+player reads at human speed. It now runs every other frame (`hud.status` 0.109
+→ 0.058 ms). The reticle, the world-space prompts and the camera stay per
+frame.
+
 ### The ranger's own tick stopped rebuilding its pose for nothing
 
 `main.physics` is the largest single scope in a frontier frame, and its largest
@@ -274,9 +282,9 @@ between 2.00 and 2.50 ms across runs.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 1.88 ms | −79% |
+| Headless, frontier idle | 9.14 ms | 1.85 ms | −80% |
 | Headless, 175 mobs fighting | 36.13 ms | 7.8 ms | −78% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.50 ms | −66% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.36 ms | −67% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |

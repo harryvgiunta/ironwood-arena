@@ -690,6 +690,8 @@ func _devil_strike(distance: float, to_player: Vector3) -> void:
 func _shoot_arrow() -> void:
 	if not is_instance_valid(_target) or get_parent() == null:
 		return
+	if not is_instance_valid(_devil):
+		return
 	var origin: Vector3 = _devil.get_bow_origin()
 	var target := _target.global_position+Vector3(0,1.0,0)+_target.velocity*0.12
 	var flight := origin.distance_to(target)/30.0
@@ -868,18 +870,24 @@ func _enter_dead(announce: bool) -> void:
 		_devil.set_weapon("claw")
 	if announce:
 		defeated.emit(self, 8 if kind == 0 else 6)
-	# Collapse first, then hold the corpse for the shared five minutes.
+	# Collapse first, then hold the corpse for the shared five minutes. A body
+	# that was killed with its rig released has no skeleton to drop: it just
+	# holds, out of sight.
+	if not is_instance_valid(_body):
+		CorpseHold.hold(self, self)
+		return
 	var death_tween := create_tween()
-	if kind == 0:
+	if kind == 0 and is_instance_valid(_wolf):
 		# The wolf's imported skeleton ragdolls limp from its current pose.
 		_wolf.die(fall)
 		death_tween.tween_interval(0.45)
-		CorpseHold.append(death_tween, self, _body)
-	else:
+	elif is_instance_valid(_devil):
 		# The imported cinder's skeleton ragdolls from its lethal pose.
 		_devil.die(fall)
 		death_tween.tween_interval(0.90)
-		CorpseHold.append(death_tween, self, _body)
+	else:
+		death_tween.tween_interval(0.45)
+	CorpseHold.append(death_tween, self, _body)
 
 ## One body's wire record: see `scripts/mob_wire.gd` for the slot layout. The
 ## extra vector carries the cinder devil's dodge and slide presentation.
@@ -913,10 +921,12 @@ func apply_snapshot(state: PackedFloat32Array, tick: int = -1) -> void:
 	var grounded := MobWire.grounded_of(state)
 	var pose := MobWire.extra_of(state)
 	_warning.visible = self.state == "WINDUP"
-	if kind == 0:
+	# A replica can have released its rig at range; the pose arrives with the
+	# snapshot and there is nothing to drive until it is rebuilt.
+	if kind == 0 and is_instance_valid(_wolf):
 		_wolf.set_motion(Vector2(velocity.x,velocity.z).length())
 		_wolf.set_combat(self.state,_state_time)
-	else:
+	elif is_instance_valid(_devil):
 		_devil.set_motion(velocity,grounded)
 		_devil.set_action(self.state,_state_time)
 		_devil.set_step(pose.x,Vector3(pose.y,0.0,pose.z))
