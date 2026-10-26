@@ -215,6 +215,31 @@ treeline. Sixty still covers every weapon's useful range and the whole town
 square. `world_style.gd` authors this per region
 (`sun_shadow_distance`).
 
+## Multiplayer, measured
+
+`--net-diag` prints one line a second on both peers. For mob replication it now
+carries `mobs`, `starved` (replicas the render buffer had to dead-reckon that
+second, i.e. the snapshot stream ran dry) and `restarts` (bodies that had to be
+snapped rather than interpolated). Run a host and a client and read the client:
+
+```
+& $Godot --headless --path . res://main.tscn -- --world-host --world-port 7831 --net-diag
+& $Godot --headless --path . res://main.tscn -- --world-join 127.0.0.1 --world-port 7831 --net-diag --net-jitter 40
+```
+
+Measured over twenty-two seconds with all seventy-five frontier mobs
+replicating:
+
+| Link | starved mob-frames | teleport restarts | seat corrections |
+| --- | --- | --- | --- |
+| 40 ms jitter | **0** | **0** | 0 |
+| 120 ms lag + 80 ms jitter | **0** | **0** | 1 |
+
+No mob was ever dead-reckoned at four times a bad connection's jitter, which is
+what "jittery multiplayer" looked like before: 507 KB/s of mob upload pushed the
+host's queue past what a home connection carries, and every starved replica
+snapped. The upload is now 152 KB/s and the buffer never empties.
+
 ## What it costs now
 
 Medians of three runs; "before" is the same suite against the same scene at

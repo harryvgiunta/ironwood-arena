@@ -89,6 +89,12 @@ var _diag_boom_step := 0.0
 var _diag_drift := 0.0
 var _diag_previous_rig := Vector3.INF
 var _diag_previous_boom := -1.0
+## Mob-replica smoothness over the last diagnostic second: frames a body was
+## dead-reckoned, and teleports it had to be restarted across.
+var _diag_mob_extrapolated := 0
+var _diag_mob_restarts := 0
+var _diag_mob_count := 0
+var _diag_restart_base := -1
 var network_role := "offline"
 var local_slot := -1
 var server_tick := 0
@@ -696,13 +702,31 @@ func _diag_step(delta: float) -> void:
 			_diag_boom_step = maxf(_diag_boom_step,absf(boom-_diag_previous_boom))
 	_diag_previous_rig = seat.rig.global_position
 	_diag_previous_boom = boom
+	var extrapolated := 0
+	var restarts := 0
+	var replicas := 0
+	for enemy in _enemies_by_index:
+		if not is_instance_valid(enemy) or not enemy.get("replica"):
+			continue
+		replicas += 1
+		var timeline = enemy.get("_timeline")
+		if timeline == null:
+			continue
+		restarts += int(timeline.restarts)
+		if timeline.extrapolating():
+			extrapolated += 1
+	_diag_mob_extrapolated = extrapolated
+	_diag_mob_count = replicas
+	_diag_mob_restarts = restarts - _diag_restart_base if _diag_restart_base >= 0 else 0
+	_diag_restart_base = restarts
 	_diag_elapsed += delta
 	if _diag_elapsed < 1.0:
 		return
-	print("NET_DIAG role=%s slot=%d predicting=%s corrections=%d drift=%.2f rig_step=%.2f boom_step=%.2f unacked=%d held=%d health=%.0f" % [
+	print("NET_DIAG role=%s slot=%d predicting=%s corrections=%d drift=%.2f rig_step=%.2f boom_step=%.2f unacked=%d held=%d health=%.0f mobs=%d starved=%d restarts=%d" % [
 		network_role,_local_seat_id(),str(seat.prediction_active()),seat.prediction_corrections,
 		_diag_drift,_diag_rig_step,_diag_boom_step,
-		seat._prediction.next_seq-int(seat._prediction.acked),_link.held,health])
+		seat._prediction.next_seq-int(seat._prediction.acked),_link.held,health,
+		_diag_mob_count,_diag_mob_extrapolated,_diag_mob_restarts])
 	_diag_elapsed = 0.0
 	_diag_rig_step = 0.0
 	_diag_boom_step = 0.0
