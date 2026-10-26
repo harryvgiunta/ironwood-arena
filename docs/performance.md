@@ -331,9 +331,9 @@ between 2.00 and 2.50 ms across runs.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 1.79 ms | −80% |
-| Headless, 175 mobs fighting | 36.13 ms | 6.89 ms | −81% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.16 ms | −68% |
+| Headless, frontier idle | 9.14 ms | 1.75 ms | −81% |
+| Headless, 175 mobs fighting | 36.13 ms | 6.50 ms | −82% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.00 ms | −69% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |
