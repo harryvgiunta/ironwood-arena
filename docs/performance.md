@@ -166,10 +166,13 @@ Corpses are never culled, so they still fall and hold.
 
 ### The rigs are culled and slowed with distance
 
-Past 45 m a mob's body stops drawing and its clip stops writing bone tracks;
-between 12 m and 45 m the sampler runs every other frame. Nobody can read a walk
-cycle through the treeline, and the animation of every distant devil was a
-third of a frontier frame.
+Past 45 m a mob's body stops drawing and its clip stops writing bone tracks.
+Inside that range the sampler runs at **thirty hertz** rather than sixty: the
+frames between skip it, so the clip advances the same time over a longer gap
+and the skeleton is only touched when it actually moves. Thirty-hertz character
+animation is the standard trade and it measures at 5% of a frontier frame — the
+faster near tier that used to exist was deleted once that was measurable rather
+than assumed to be below noise.
 
 ### The world's bodies are indexed once per frame
 
@@ -304,9 +307,9 @@ between 2.00 and 2.50 ms across runs.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 1.77 ms | −81% |
-| Headless, 175 mobs fighting | 36.13 ms | 7.47 ms | −79% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.37 ms | −67% |
+| Headless, frontier idle | 9.14 ms | 1.79 ms | −80% |
+| Headless, 175 mobs fighting | 36.13 ms | 7.09 ms | −80% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.11 ms | −68% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |
@@ -346,8 +349,8 @@ three:
 | | ms | share |
 | --- | --- | --- |
 | World, ranger and loop, no mobs (`--nomobs`) | 0.75 | 42% |
-| The seventy-five mobs | 1.02 | 58% |
-| **Total** | **1.77** | |
+| The seventy-five mobs | 1.04 | 58% |
+| **Total** | **1.79** | |
 
 Per body that is **14.7 µs a frame**, of which the scoped runs attribute about
 3.5 µs to the mob's own script (state machines, sight, spacing, the per-frame

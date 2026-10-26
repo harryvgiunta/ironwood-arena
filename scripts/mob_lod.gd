@@ -21,10 +21,15 @@ extends RefCounted
 ## range through the trees, and the animation of every distant devil is roughly
 ## a third of a frontier frame.
 const ANIMATE_RANGE := 45.0
+## Frames per animation step for a body inside that range. Thirty hertz is the
+## standard trade for character animation: the sampler is skipped on the frames
+## between, so the clip advances the same time over a longer gap and the
+## skeleton is only touched when it actually moves. Measured at 5% of a
+## frontier frame over sixty-hertz rigs.
+const ANIMATE_STRIDE := 2
 ## Inside this the rig animates every frame; between here and `ANIMATE_RANGE`
 ## it animates every other frame, which halves the bone work of every body that
 ## is not right in front of the player and reads identically at that distance.
-const ANIMATE_NEAR := 12.0
 ## Past this a body's presentation subtree is released rather than frozen, and
 ## rebuilt when it comes back inside `ANIMATE_RANGE`. The gap between the two
 ## is hysteresis: a body pacing the boundary must not build and free a rig
@@ -65,12 +70,6 @@ static func phase(at: Vector3, span: int) -> int:
 
 
 ## True when this mob should think on this physics frame.
-## 1 for full rate, 2 for half rate; a body beyond `ANIMATE_RANGE` is frozen
-## outright.
-static func anim_stride(distance: float) -> int:
-	return 1 if distance <= ANIMATE_NEAR else 2
-
-
 static func should_animate(distance: float) -> bool:
 	return distance <= ANIMATE_RANGE
 

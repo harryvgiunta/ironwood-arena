@@ -995,7 +995,7 @@ func _apply_presentation(distance: float) -> void:
 		return
 	if _body == null:
 		return
-	var stride := MobLod.anim_stride(distance)
+	var stride := MobLod.ANIMATE_STRIDE
 	if stride != _anim_stride:
 		_anim_stride = stride
 		if is_instance_valid(_wolf):
