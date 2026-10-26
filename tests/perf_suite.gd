@@ -91,9 +91,11 @@ var _leaf_shadows_off := false
 ## own their physics step and whose snapshots are dictionaries. The same file
 ## runs on both sides so the two numbers are directly comparable.
 var _legacy := false
-## Frame budget in milliseconds. When set, every measured window reports
-## whether it stayed inside it.
-var _budget_ms := 0.0
+## Frame budget in milliseconds, applied to every measured window's median.
+## The 60 Hz frame is 16.67; anything at or under this is a pass. `--budget=0`
+## turns the gate off for pure exploration.
+var _budget_ms := 16.6
+var _failed := 0
 var seconds := 6.0
 var spawned: Array = []
 var _steps: Array = []
@@ -262,7 +264,13 @@ func _plan() -> Array:
 
 func _begin_step() -> void:
 	if _step >= _steps.size():
-		print("PERF done")
+		# The gate: a run that leaves a window over budget fails, so this is a
+		# regression check rather than only a report.
+		if _failed > 0:
+			print("PERF GATE FAIL windows=%d budget=%.2f ms" % [_failed, _budget_ms])
+			quit(1)
+			return
+		print("PERF GATE PASS budget=%.2f ms" % _budget_ms)
 		quit(0)
 		return
 	var step: Dictionary = _steps[_step]
@@ -306,10 +314,12 @@ func _finish_step() -> void:
 		str(step.label), main.enemies.size(), _count(root)]))
 	_print_render()
 	if _budget_ms > 0.0:
-		var average := float(Perf.frame_us) / float(maxi(1, Perf.frames)) / 1000.0
-		print("PERF budget %s: %.2f ms of %.2f ms %s" % [
-			str(step.label), average, _budget_ms,
-			"PASS" if average <= _budget_ms else "FAIL"])
+		var median := Perf._median_ms()
+		var ok := median <= _budget_ms
+		if not ok:
+			_failed += 1
+		print("PERF budget %s: median %.2f ms of %.2f ms %s" % [
+			str(step.label), median, _budget_ms, "PASS" if ok else "FAIL"])
 	if str(step.label) == "spawn":
 		_print_gaps("spawn")
 	if str(step.label) == "net":

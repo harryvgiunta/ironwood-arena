@@ -25,8 +25,10 @@ Costs are therefore comparable across runs and additive across scopes.
 | `net` | The host replication path over that crowd: snapshot building, datagram packing, lag history. |
 | `all` | All four in one process. |
 
-Flags: `--mobs=N`, `--seconds=S`, `--budget=MS` (report PASS/FAIL against a
-frame budget).
+**The suite is a gate.** Every measured window's median is compared against
+`--budget` (16.6 ms by default, the 60 Hz frame) and the run exits non-zero if
+any of them breaches it, so `perf_suite` is a regression check and not only a
+report. `--budget=0` turns the gate off for exploration.
 
 Attribution knobs, for finding where a cost actually lives:
 

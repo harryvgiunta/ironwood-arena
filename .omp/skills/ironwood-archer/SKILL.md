@@ -420,7 +420,7 @@ foreach ($Check in $Checks) {
 
 Use the selected engine path instead if `GODOT_PATH` is configured. Check exit codes and Godot parse/runtime errors, not just a final success line.
 
-- `perf_suite` is the frame benchmark, not a correctness suite: it runs the real `main.tscn` headless under `--fixed-fps 60` and reports where each millisecond went. Run it before and after a change that touches mob ticks, world collision, animation or replication, with `--mode=all --budget=<ms>`. `docs/performance.md` records the recorded numbers and the open levers.
+- `perf_suite` is the frame benchmark, not a correctness suite: it runs the real `main.tscn` headless under `--fixed-fps 60` and reports where each millisecond went. Run it before and after a change that touches mob ticks, world collision, animation or replication, with `--mode=all`. It is a gate: each window's median is checked against `--budget` (16.6 ms default) and the run exits non-zero if any breaches it. `docs/performance.md` records the recorded numbers and the open levers.
 - `rig_regression` covers anatomy, bow geometry, grip/anchor, follow-through, and terrain contact.
 - `draw_combat_regression` covers charge fractions, release uniqueness, re-nock boundaries, movement, cancellation, swaps, and long frames.
 - `projectile_regression` covers real projectile collision behavior.
