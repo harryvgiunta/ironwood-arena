@@ -444,6 +444,44 @@ This is the number the ninety-percent question actually turns on: the target
 leaves 0.16 ms for monsters, which is about five nearby bodies in the current
 model, or one that costs a seventh as much.
 
+## Choosing the next ten percent
+
+The engine work is done, so the remaining distance is a decision about content.
+This is what each decision costs, measured with `--keep=N` (the N nearest
+frontier mobs kept, everything else freed):
+
+| mobs near the player | median frame | against the 9.14 ms original |
+| --- | --- | --- |
+| 0 | 0.75 ms | −92% |
+| 3 | 0.84 ms | −91% |
+| **5** | **0.91 ms** | **−90%** |
+| 8 | 0.99 ms | −89% |
+| 12 | 1.11 ms | −88% |
+| 20 | 1.27 ms | −86% |
+| 30 | 1.62 ms | −82% |
+| 75 (as authored) | 1.75 ms | −81% |
+
+**The ninety-percent target is five monsters near the ranger.** Not five
+authored — five within about fifty-five metres at once. The frontier currently
+puts about thirty there, because the devil court is authored twelve to forty
+metres from the town gate and the wildlife is clustered around the same roads.
+
+Three ways to close the last ten points, in order of price:
+
+1. **Thin the near field.** Space the authored courts and packs further apart,
+   or hold the far ones culled until the ranger has walked toward them. It
+   costs nothing in code — `--keep` is already measuring exactly this — and the
+   price is fewer monsters visible around the player at once.
+2. **One brain for a pack** (0.15–0.30 ms). A hundred mobs in a room run a
+   hundred sight passes, spacing walks and state machines to produce one fight.
+   This is the only lever that keeps every monster visible.
+3. **A lighter world** (0.69 ms of the windowed frame is the forest alone, plus
+   its shadow pass). Needs less foliage geometry or a cheaper foliage shader,
+   which is asset work, not code.
+
+Everything above this line in the file is what the engine can give back. What
+is left is which of those three the game wants.
+
 ## What is left
 
 In rough order of payoff, for whoever picks this up:
