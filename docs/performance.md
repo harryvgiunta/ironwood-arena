@@ -159,6 +159,20 @@ because pairing is decided by the *querying* body's mask and the mob keeps its
 layer. Dense scenes drop about three percent; the frontier is unchanged
 because its bodies are spread out.
 
+### Rig animation is culled by the camera
+
+Being in range and being *seen* are different questions. A monster within 45 m
+owns its rig, but if the viewer's frustum does not contain it the clip stops
+advancing and the body stops drawing — a freeze, not a release, so turning the
+camera back does not rebuild a mesh. Nineteen of a hundred mobs in a ring are
+in view at any moment, and that is worth about six percent of the dense case.
+
+It only applies where this peer's camera is the only viewer — offline, or on a
+client, whose camera is the one drawing the replicas. A host with remote peers
+cannot know what they can see. Ranger clones are exempt outright: the bow draw
+they time their release against lives in their rig, so a clone keeps animating
+even when the camera has left it (the suite caught exactly that).
+
 ### Bodies nobody can see are not ticked
 
 A mob's own tick costs it about six microseconds a frame before it decides

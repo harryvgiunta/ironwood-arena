@@ -80,6 +80,8 @@ var _ground: MobGround = MobGround.new()
 ## six microseconds a frame, more than the work it is choosing to skip, so the
 ## scene does it once for all of them and the body just reads a bool.
 var skip_tick := false
+## Set by the scene when the body is outside the viewer's frustum.
+var offscreen := false
 var _lod_stride := 1
 var _lod_phase := 0
 var _presenting := true
@@ -789,6 +791,8 @@ func _lod_distance() -> float:
 func _apply_presentation(distance: float) -> void:
 	if _body == null or terrain == null:
 		return
+	# A clone's rig is gameplay: the bow draw it times its release against lives
+	# there, so a clone keeps animating even when the camera has left it.
 	var live := MobLod.should_animate(distance)
 	if live == _presenting:
 		return

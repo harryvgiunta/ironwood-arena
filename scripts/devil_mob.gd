@@ -166,6 +166,10 @@ var _push_phase := 0
 ## six microseconds a frame, more than the work it is choosing to skip, so the
 ## scene does it once for all of them and the body just reads a bool.
 var skip_tick := false
+## Set by the scene when the body is outside the viewer's frustum. An offscreen
+## monster still simulates; it just stops spending frames on its rig, and the
+## pose it resumes with reads correctly because nobody watched the gap.
+var offscreen := false
 var _lod_stride := 1
 var _lod_phase := 0
 ## Whether the rig is currently being animated and drawn.
@@ -825,20 +829,29 @@ func _apply_presentation(distance: float) -> void:
 	# exists for, so only a missing world bails out here.
 	if terrain == null:
 		return
-	var live := MobLod.should_animate(distance)
-	if live != _presenting:
-		_presenting = live
-		if _body == null and live:
+	# Two separate questions. A body in range owns a rig; a body the viewer can
+	# actually see spends frames animating it. Being offscreen is a *freeze*,
+	# not a release -- freeing here would rebuild the rig every time the camera
+	# turned.
+	var in_range := MobLod.should_animate(distance)
+	var animate := in_range and not offscreen
+	if in_range != _presenting:
+		_presenting = in_range
+		if _body == null and in_range:
 			# Coming back into range: rebuild the rig and let the next tick's
 			# `set_motion`/`set_combat` put it in the right clip.
 			_build_rig()
 		elif _body != null:
-			_body.visible = live
+			_body.visible = animate
 			if is_instance_valid(_visual):
-				_visual.set_frozen(not live)
-	if not live and _body != null and distance > MobLod.RELEASE_RANGE:
+				_visual.set_frozen(not animate)
+	if distance > MobLod.RELEASE_RANGE and _body != null:
 		_release_rig()
 		return
+	if _body != null and _body.visible != animate:
+		_body.visible = animate
+		if is_instance_valid(_visual):
+			_visual.set_frozen(not animate)
 	if _body == null:
 		return
 	var stride := MobLod.ANIMATE_STRIDE

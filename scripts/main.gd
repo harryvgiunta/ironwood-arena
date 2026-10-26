@@ -3060,6 +3060,14 @@ func _step_mob_culling() -> void:
 	# than a second of margin before a skipped body would need presenting.
 	if Engine.get_physics_frames() % 15 != 0:
 		return
+	# Offscreen animation culling is only safe when this peer's camera is the
+	# only viewer: offline, or a client (whose camera is the one drawing the
+	# replicas). A host with remote peers cannot know what they can see.
+	var cull_offscreen := network_role == "offline" or network_role == "client"
 	for enemy in _enemies_by_index:
-		if is_instance_valid(enemy):
-			enemy.skip_tick = not _enemy_relevant(enemy) and bool(enemy.get("alive")) != false
+		if not is_instance_valid(enemy):
+			continue
+		enemy.skip_tick = not _enemy_relevant(enemy) and bool(enemy.get("alive")) != false
+		if cull_offscreen and is_instance_valid(camera):
+			enemy.offscreen = not camera.is_position_in_frustum(
+				enemy.global_position + Vector3(0.0, 1.0, 0.0))
