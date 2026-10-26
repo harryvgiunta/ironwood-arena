@@ -219,23 +219,25 @@ square. `world_style.gd` authors this per region
 
 Medians of three runs; "before" is the same suite against the same scene at
 `main`'s commit. Frame figures move by about eight percent between runs on this
-machine, so treat the last digit as noise.
+machine, so treat the last digit as noise; the idle frontier has measured
+between 2.28 and 2.50 ms across runs.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 2.28 ms | −75% |
-| Headless, 175 mobs fighting | 36.13 ms | 8.54 ms | −76% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.88 ms | −64% |
+| Headless, frontier idle | 9.14 ms | 2.44 ms | −73% |
+| Headless, 175 mobs fighting | 36.13 ms | 8.17 ms | −77% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.55 ms | −66% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |
 | The first blow of a session | 135 ms | 28 ms | −79% |
 | The first blow after that | 20-37 ms | ~3 ms | −90% |
 | Worst frame, 175 mobs fighting | 154 ms | 38 ms | −75% |
+| Worst frame, frontier idle | 22 ms | 3.9 ms | −82% |
 | Host upload, 133 mobs | 507 KB/s | 152 KB/s | −70% |
 
 The frame rate that matters to a player — the windowed frontier — went from
-**52 fps to about 145 fps**.
+**52 fps to about 153 fps**.
 
 Three suites fail on `main` as well as here, and are not regressions:
 `devil_regression` (2: the cinder devil's death clip and corpse head drop),
