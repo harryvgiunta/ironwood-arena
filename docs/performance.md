@@ -230,9 +230,11 @@ Three suites fail on `main` as well as here, and are not regressions:
 `corpse_regression` (1: the procedural delve devil killed in the air) and
 `network_input_regression` (27).
 
-At 175 mobs fighting, the largest remaining costs are the state machines, the
-sight rays, the rigs of the bodies inside the animation range, and the physics
-broadphase keeping a hundred and seventy-five hit bodies hittable.
+At 175 mobs fighting, the largest remaining costs are the state machines and
+sight rays of the bodies in reach (about 4 ms), the rigs of the bodies inside
+the animation range (about 1.7 ms), and the cost of a hundred and seventy-five
+bodies existing at all. The physics server is not among them: kept bodies cost
+0.05 ms.
 
 ## What is left
 
@@ -269,7 +271,6 @@ Measured and dismissed, so nobody repeats them:
   handful of bodies actually near him, and that is content, not waste.
 - **A cheaper HUD frame** — `main._process` costs 0.17 ms with the whole status
   block, the reticle, the map and the interaction probe in it.
-
 - **Replacing the mob bodies with analytic hitboxes** — the shapes cost 0.05 ms
   across 175 bodies once locomotion stopped querying the physics server.
 - **Coarser scatter chunks** — 44 m to 96 m moved draw calls by 4% and grew the
