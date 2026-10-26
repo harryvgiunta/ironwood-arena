@@ -390,6 +390,11 @@ Measured and dismissed, so nobody repeats them:
   rebuilding it from a record was built and measured: 25 of 75 bodies slept and
   the frame moved 0.05 ms, because releasing their rigs had already taken the
   far-body cost. It was reverted rather than carried.
+- **Driving the `AnimationPlayer` by hand to make the thirty-hertz stride real**
+  — `set_process(false)` plus `advance(delta)` on the sampled frames made the
+  frame *worse* (1.79 → 1.90 ms and 7.0 → 7.7 ms in the room): Godot's own
+  player update is cheaper than an explicit `advance` per sampled frame. Only
+  freeing the rig removes the clip cost.
 - **A tighter or slower animation range** — 45 m to 24 m, and half-rate
   everywhere instead of only past 12 m, both moved the frame by less than the
   run-to-run noise. The animation that remains is the ranger's own rig and the
