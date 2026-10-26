@@ -300,13 +300,18 @@ func _physics_process(delta: float) -> void:
 	_apply_presentation(nearest)
 	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
 	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
+		# Keep the body moving on the intent it last chose.
+		if _move_intent.length_squared() > 0.0001:
+			_apply_motion(delta, -global_basis.z)
 		return
 	if stride != _lod_stride:
 		_lod_stride = stride
 		_lod_phase = MobLod.phase(global_position, stride)
+	# The scaled delta is for timers; `delta` itself is the real frame and
+	# drives the motion.
 	Perf.begin("clone.ai")
 	dodge.advance(delta * float(stride),_ground.grounded)
-	_step_ai(delta * float(stride),targets)
+	_step_ai(delta * float(stride),targets,delta)
 	Perf.end()
 
 
@@ -318,7 +323,9 @@ func step(delta: float, actors: Array = [], _peers: Array = []) -> void:
 	_step_ai(delta,actors)
 
 
-func _step_ai(delta: float, candidates: Array) -> void:
+func _step_ai(delta: float, candidates: Array, frame: float = -1.0) -> void:
+	if frame < 0.0:
+		frame = delta
 	_state_time += delta
 	_attack_cooldown = maxf(0.0,_attack_cooldown - delta)
 	_guard_cooldown = maxf(0.0,_guard_cooldown - delta)
@@ -348,7 +355,7 @@ func _step_ai(delta: float, candidates: Array) -> void:
 		if return_to.length() > 1.5:
 			_move_intent = _steer(return_to.normalized())
 			_move_speed = 3.4
-		_apply_motion(delta,_move_intent)
+		_apply_motion(frame,_move_intent)
 		return
 	var to_target: Vector3 = _target.global_position - global_position
 	to_target.y = 0.0
@@ -383,7 +390,7 @@ func _step_ai(delta: float, candidates: Array) -> void:
 	else:
 		state = "STRIKE" if _swing_pending else "CIRCLE"
 		_blade_step(distance,direction)
-	_apply_motion(delta,direction)
+	_apply_motion(frame,direction)
 
 
 func _apply_motion(delta: float, facing_direction: Vector3) -> void:

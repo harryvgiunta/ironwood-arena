@@ -142,6 +142,11 @@ var _strike_direction := Vector3.FORWARD
 var _face_intent := Vector3.FORWARD
 var _move_intent := Vector3.ZERO
 var _move_speed := 0.0
+## The velocity the last decision asked for. Between decisions the body keeps
+## travelling toward it, so the think rate and the movement rate are separate:
+## a mob that is only orbiting decides five times a second and still moves every
+## frame.
+var _desired := Vector3.ZERO
 var _strafe_dir := 1.0
 var _visual
 var _body: Node3D
@@ -254,10 +259,20 @@ func _physics_process(delta: float) -> void:
 	# speeds, cooldowns and state timers stay in real time.
 	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
 	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
+		# No decision this frame, but the body still travels: the motion step is
+		# a few array reads and it is what keeps a coarse think rate invisible.
+		if _desired.length_squared() > 0.0001 or not _ground.grounded:
+			_ground.step(self, delta, _desired, 26.0 if _ground.grounded else 7.0)
+			if is_instance_valid(_visual):
+				_visual.set_motion(_ground.actual, _ground.grounded)
 		return
 	if stride != _lod_stride:
 		_lod_stride = stride
 		_lod_phase = MobLod.phase(global_position, stride)
+	# Two clocks: `delta` carries the skipped time for timers, state clocks and
+	# cooldowns, while `frame` is the real frame and drives the motion. Moving
+	# by the accumulated delta is what used to make a coarse stride jump.
+	var frame := delta
 	delta *= float(stride)
 	Perf.begin("mob.ai")
 	# Sight, not proximity, decides whether this mob is in a fight. Losing the
@@ -340,7 +355,7 @@ func _physics_process(delta: float) -> void:
 	_separate()
 	Perf.end()
 	Perf.begin("mob.drive")
-	_drive(delta)
+	_drive(frame)
 	Perf.end()
 	Perf.begin("mob.visual")
 	if is_instance_valid(_visual):
@@ -522,6 +537,7 @@ func _drive(delta: float) -> void:
 		desired = _strike_direction * _lunge * (1.0 - 0.62 * spent)
 	elif state == "WINDUP" or state == "STAGGER":
 		desired = Vector3.ZERO
+	_desired = desired
 	var control := 26.0 if _ground.grounded else 7.0
 	if _face_intent.length_squared() > 0.0001 and state != "STAGGER":
 		rotation.y = lerp_angle(rotation.y, atan2(-_face_intent.x, -_face_intent.z),

@@ -117,10 +117,26 @@ an obstacle is nudged onto the nearest open ground.
 per-tick costs, and none of them need sixty hertz. A mob that is inside its
 swing window — winding up, striking or recovering, or ready to swing and
 already in reach — thinks every second tick. Everything else thinks every
-third tick inside 22 m, every sixth out to 55 m, and every twelfth beyond. A
-decimated tick scales `delta`, so speeds, cooldowns and state timers stay in
-real time. The distinction matters: a hundred devils standing in a ring around
-one ranger are a hundred orbits, not a hundred fights.
+fourth tick inside 22 m, every eighth out to 55 m, and every twenty-fourth
+beyond. A decimated tick scales `delta`, so speeds, cooldowns and state timers
+stay in real time.
+
+**Movement is not decimated, and it has its own clock.** A decimated tick
+carries two deltas: the accumulated one for timers, state clocks and cooldowns,
+and the real frame for motion. Moving by the accumulated delta is what used to
+make a coarse think rate stutter — a mid-range body travelled 41 cm every
+eighth frame and stood still in between, and after the first attempt at this
+it travelled 56 cm every eighth frame because the motion step inherited the
+scaled delta. Both are gone: measured over ninety frames a body in the middle
+tier now advances **7 cm on every single frame**.
+
+On the frames between decisions a body keeps travelling toward the velocity it
+last chose. A body with nothing to do — an idle monster at its home — does not
+even take that step.
+
+The distinction inside the stride matters too: a hundred devils standing in a
+ring around one ranger are a hundred orbits, not a hundred fights, and only the
+ones actually swinging get the fine rate.
 
 Spacing is a soft constraint on top of that: it is re-measured one frame in six
 and the result reused, staggered per mob so a hundred bodies do not all measure
@@ -164,7 +180,7 @@ comes back, which is the one visible cost of the trade and it happens at the
 edge of the treeline. Replicas on a client run the same culling — they own the
 only copy of a mob a client draws, so they get the same saving.
 
-`devil_mobs_regression` and `forest_mobs_regression` pin both halves: a body in
+`mob_motion_regression` pins the motion/time split directly: every frame a walking body moves, and evenly. `devil_mobs_regression` and `forest_mobs_regression` pin both halves of the rig contract: a body in
 view has its imported visual, a body past the release range has none, and a
 released body that comes back rebuilds it and is playing a clip.
 
@@ -245,13 +261,13 @@ snapped. The upload is now 152 KB/s and the buffer never empties.
 Medians of three runs; "before" is the same suite against the same scene at
 `main`'s commit. Frame figures move by about eight percent between runs on this
 machine, so treat the last digit as noise; the idle frontier has measured
-between 2.28 and 2.50 ms across runs.
+between 2.23 and 2.50 ms across runs.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 2.44 ms | −73% |
-| Headless, 175 mobs fighting | 36.13 ms | 8.17 ms | −77% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.55 ms | −66% |
+| Headless, frontier idle | 9.14 ms | 2.24 ms | −75% |
+| Headless, 175 mobs fighting | 36.13 ms | 8.52 ms | −76% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.35 ms | −67% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |

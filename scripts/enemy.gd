@@ -276,10 +276,17 @@ func _physics_process(delta: float) -> void:
 	_apply_presentation(nearest)
 	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
 	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
+		# No decision, but the body keeps travelling on the velocity it last
+		# chose: the think rate is coarse, the motion is not.
+		if _ground.velocity.length_squared() > 0.01 or not _ground.grounded:
+			_ground.drive(self, delta)
 		return
 	if stride != _lod_stride:
 		_lod_stride = stride
 		_lod_phase = MobLod.phase(global_position, stride)
+	# Two clocks, as in `devil_mob`: the scaled one for timers, the real frame
+	# for motion.
+	var frame := delta
 	delta *= float(stride)
 	Perf.begin("legacy.ai")
 	# Sight and the pursuit memory decide aggression for the wolf and the
@@ -293,7 +300,7 @@ func _physics_process(delta: float) -> void:
 		Perf.end()
 		return
 	if kind == 2:
-		_step_devil(delta, pursuit)
+		_step_devil(delta, pursuit, frame)
 		Perf.end()
 		return
 	_state_time += delta
@@ -344,13 +351,13 @@ func _physics_process(delta: float) -> void:
 		Perf.begin("mob.steer")
 		target_direction = _steer(target_direction)
 		Perf.end()
-		rotation.y = lerp_angle(rotation.y, atan2(-target_direction.x, -target_direction.z), minf(delta * 8.0, 1.0))
-	velocity.x = move_toward(velocity.x, target_direction.x * speed, delta * 12.0)
-	velocity.z = move_toward(velocity.z, target_direction.z * speed, delta * 12.0)
-	velocity.y = -1.0 if _ground.grounded else velocity.y - 18.0 * delta
+		rotation.y = lerp_angle(rotation.y, atan2(-target_direction.x, -target_direction.z), minf(frame * 8.0, 1.0))
+	velocity.x = move_toward(velocity.x, target_direction.x * speed, frame * 12.0)
+	velocity.z = move_toward(velocity.z, target_direction.z * speed, frame * 12.0)
+	velocity.y = -1.0 if _ground.grounded else velocity.y - 18.0 * frame
 	Perf.begin("mob.drive")
 	Perf.begin("mob.slide")
-	_ground.drive(self,delta)
+	_ground.drive(self,frame)
 	Perf.end()
 	Perf.end()
 	Perf.begin("mob.visual")
@@ -407,9 +414,11 @@ func _update_cosmetics(_delta: float) -> void:
 	_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
 	_wolf.set_combat(state, _state_time)
 
-func _step_devil(delta: float, pursuit: bool) -> void:
+func _step_devil(delta: float, pursuit: bool, frame: float = -1.0) -> void:
+	if frame < 0.0:
+		frame = delta
 	_state_time += delta
-	_dodge.advance(delta,_ground.grounded)
+	_dodge.advance(frame,_ground.grounded)
 	_attack_cooldown = maxf(0.0,_attack_cooldown-delta)
 	_decision_timer -= delta
 	_leap_cooldown = maxf(0.0,_leap_cooldown-delta)
@@ -520,18 +529,18 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 	else:
 		var target := _move_intent*_move_speed
 		var control := 32.0 if was_grounded else 9.0
-		velocity.x = move_toward(velocity.x,target.x,control*delta)
-		velocity.z = move_toward(velocity.z,target.z,control*delta)
+		velocity.x = move_toward(velocity.x,target.x,control*frame)
+		velocity.z = move_toward(velocity.z,target.z,control*frame)
 	if was_grounded and velocity.y <= 0.0:
 		velocity.y = -1.0
 	elif not was_grounded:
-		velocity.y -= 18.0*delta
+		velocity.y -= 18.0*frame
 	var facing := _face_intent
 	if facing.length_squared() < 0.0001 or _dodge.active:
 		facing = -global_basis.z
 	if facing.length_squared() > 0.0001:
-		rotation.y = lerp_angle(rotation.y,atan2(-facing.x,-facing.z),minf(delta*12.0,1.0))
-	_ground.drive(self,delta)
+		rotation.y = lerp_angle(rotation.y,atan2(-facing.x,-facing.z),minf(frame*12.0,1.0))
+	_ground.drive(self,frame)
 	var actual: Vector3 = _ground.actual
 	if state == "LEAP" and not was_grounded and _ground.grounded and _leap_air_time > 0.18:
 		if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
