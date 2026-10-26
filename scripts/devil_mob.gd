@@ -194,7 +194,10 @@ func _ready() -> void:
 		if facing.length_squared() > 0.0001:
 			rotation.y = atan2(-facing.x, -facing.z)
 	collision_layer = 2
-	collision_mask = 1 | 2 | 4
+	# Nothing here queries the physics server -- the body walks on the analytic
+	# ground -- so a mask would only make this shape pair with every other mob
+	# and with the ranger in the broadphase.
+	collision_mask = 0
 	# The body keeps its shape so blades, arrows and spells can find it; the
 	# ground motion below never asks the physics server to move it.
 	floor_snap_length = 0.6

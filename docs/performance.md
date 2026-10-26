@@ -149,6 +149,16 @@ Spacing is a soft constraint on top of that: it is re-measured one frame in six
 and the result reused, staggered per mob so a hundred bodies do not all measure
 on the same frame.
 
+### A mob no longer asks the physics server for anything
+
+Its body walks on the analytic ground, so its `collision_mask` was only ever
+asking to be paired with every other mob and with the ranger in the broadphase:
+seventy-five bodies in a room made a couple of thousand pairs that nothing
+resolved. The mask is zero now — arrows and the ranger still find the body,
+because pairing is decided by the *querying* body's mask and the mob keeps its
+layer. Dense scenes drop about three percent; the frontier is unchanged
+because its bodies are spread out.
+
 ### Bodies nobody can see are not ticked
 
 A mob's own tick costs it about six microseconds a frame before it decides

@@ -116,7 +116,10 @@ func _ready() -> void:
 	max_health = 38.0 if kind == 0 else DEVIL_HEALTH
 	health = max_health
 	collision_layer = 2
-	collision_mask = 1 | 2 | 4
+	# Nothing here queries the physics server -- the body walks on the analytic
+	# ground -- so a mask would only make this shape pair with every other mob
+	# and with the ranger in the broadphase.
+	collision_mask = 0
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
 	_ground.radius = 0.34
