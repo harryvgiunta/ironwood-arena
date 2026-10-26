@@ -304,6 +304,10 @@ In rough order of payoff, for whoever picks this up:
 
 Measured and dismissed, so nobody repeats them:
 
+- **Streaming far bodies out entirely** — freeing every mob past 72 m and
+  rebuilding it from a record was built and measured: 25 of 75 bodies slept and
+  the frame moved 0.05 ms, because releasing their rigs had already taken the
+  far-body cost. It was reverted rather than carried.
 - **A tighter or slower animation range** — 45 m to 24 m, and half-rate
   everywhere instead of only past 12 m, both moved the frame by less than the
   run-to-run noise. The animation that remains is the ranger's own rig and the
