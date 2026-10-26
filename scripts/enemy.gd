@@ -267,13 +267,17 @@ func _physics_process(delta: float) -> void:
 		# A replica still owns its presentation: on a client it is the only
 		# thing drawing the mob, so it wants the same distance culling and the
 		# same rig release the host's own bodies get.
+		Perf.begin("mob.lod")
 		_apply_presentation(_lod_distance())
+		Perf.end()
 		return
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
+	Perf.begin("mob.lod")
 	var nearest := _lod_distance()
 	_apply_presentation(nearest)
+	Perf.end()
 	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
 	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
 		# No decision, but the body keeps travelling on the velocity it last

@@ -245,7 +245,9 @@ func _physics_process(delta: float) -> void:
 		# A replica still owns its presentation: on a client it is the only
 		# thing drawing the mob, so it wants the same distance culling and the
 		# same rig release the host's own bodies get.
+		Perf.begin("mob.lod")
 		_apply_presentation(_lod_distance())
+		Perf.end()
 		return
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
@@ -253,8 +255,10 @@ func _physics_process(delta: float) -> void:
 	# Presentation follows distance, not the think rate: a body far enough away
 	# keeps its last pose and stops drawing, which is most of the frame when a
 	# hundred of them are spread over the frontier.
+	Perf.begin("mob.lod")
 	var nearest := _lod_distance()
 	_apply_presentation(nearest)
+	Perf.end()
 	# Think on this mob's stride. The tick integrates the time it skipped, so
 	# speeds, cooldowns and state timers stay in real time.
 	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
