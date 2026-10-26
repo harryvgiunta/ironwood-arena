@@ -12,6 +12,7 @@ extends Node3D
 ## always coincides with the gameplay strike.
 
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const SCENES := {
 	"hell_goat": "res://assets/characters/devils/ironwood_hell_goat.glb",
@@ -97,24 +98,36 @@ var _dead := false
 var _death_time := 0.0
 var _death_held := false
 var _hover_time := 0.0
+## Frames per animation step. The sampler is skipped on the frames between, so
+## the clip advances the same amount of time over a longer wall-clock gap and
+## the skeleton is only touched on the frames it actually moves.
+var _anim_stride := 1
+var _anim_phase := 0
 
 
 func _ready() -> void:
+	Perf.begin("spawn.visual")
 	var scenes := _scenes()
 	if not scenes.has(mob_id):
 		push_error("Unknown mob: " + mob_id)
+		Perf.end()
 		return
 	_data = _data_table()[mob_id]
 	var packed: PackedScene = load(str(scenes[mob_id]))
 	if packed == null:
 		push_error("Missing mob scene: " + str(scenes[mob_id]))
+		Perf.end()
 		return
+	Perf.begin("spawn.instantiate")
 	_instance = packed.instantiate()
 	add_child(_instance)
+	Perf.end()
+	Perf.begin("spawn.setup")
 	_player = _instance.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	_skeleton = _instance.find_child("Skeleton3D", true, false) as Skeleton3D
 	if _player == null or _skeleton == null:
 		push_error("Mob visual is missing its AnimationPlayer or Skeleton3D: " + mob_id)
+		Perf.end()
 		return
 	_head_bone = _skeleton.find_bone("head")
 	# The limb that lands the blow: hand for the bipeds, front paw for the
@@ -127,6 +140,7 @@ func _ready() -> void:
 	for key in ["idle", "walk", "run", "attack", "hit", "death"]:
 		if not _player.has_animation(str(_data[key])):
 			push_error("Mob visual is missing clip %s for %s" % [_data[key], mob_id])
+			Perf.end()
 			return
 	for key in ["idle", "walk", "run"]:
 		_player.get_animation(str(_data[key])).loop_mode = Animation.LOOP_LINEAR
@@ -136,7 +150,9 @@ func _ready() -> void:
 	_clip = str(_data["idle"])
 	_player.play(_clip, 0.0)
 	_player.speed_scale = 1.0
+	Perf.end()
 	_tune_materials()
+	Perf.end()
 
 
 ## Virtual so a second mobset reuses this sampler instead of forking it:
@@ -149,15 +165,47 @@ func _data_table() -> Dictionary:
 	return DATA
 
 
+## Instantiates and discards one body per species, so the first real spawn does
+## not pay for resource creation. A species' first instantiation builds its
+## skeleton, skin and materials and costs a third of a second; doing it while
+## the room loads keeps that off the frame a wave appears on.
+static func warm(paths: Array) -> void:
+	for path in paths:
+		var packed: PackedScene = load(String(path))
+		if packed == null:
+			continue
+		var instance := packed.instantiate()
+		if instance != null:
+			instance.free()
+
+
+## One tuned material set per mob species, shared by every body of that
+## species. The tuning only reads the authored material and the species'
+## `organic` flag, so it is identical for every instance; duplicating it per
+## body was a quarter of the cost of adding a monster to the world.
+static var _tuned: Dictionary = {}
+
+
 func _tune_materials() -> void:
 	if _instance == null:
 		return
+	Perf.begin("spawn.materials")
+	var shared: Array = _tuned.get(mob_id, [])
+	var fresh: bool = shared.is_empty()
+	var slot := 0
 	for mesh_instance in _instance.find_children("*", "MeshInstance3D", true, false):
 		var node := mesh_instance as MeshInstance3D
 		for surface in node.mesh.get_surface_count():
+			if not fresh and slot < shared.size():
+				var known = shared[slot]
+				if known != null:
+					node.set_surface_override_material(surface, known as Material)
+				slot += 1
+				continue
 			var material := node.get_active_material(surface)
+			var tuned: StandardMaterial3D = null
 			if material is StandardMaterial3D:
-				var tuned := (material as StandardMaterial3D).duplicate() as StandardMaterial3D
+				tuned = (material as StandardMaterial3D).duplicate() as StandardMaterial3D
 				tuned.emission_energy_multiplier = 1.35
 				tuned.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 				var mat_name := tuned.resource_name.to_lower()
@@ -168,6 +216,12 @@ func _tune_materials() -> void:
 					tuned.subsurf_scatter_enabled = true
 					tuned.subsurf_scatter_strength = 0.06
 				node.set_surface_override_material(surface, tuned)
+			if fresh:
+				shared.append(tuned)
+			slot += 1
+	if fresh and not shared.is_empty():
+		_tuned[mob_id] = shared
+	Perf.end()
 
 
 func set_motion(velocity: Vector3, grounded: bool) -> void:
@@ -266,6 +320,12 @@ func is_dead() -> bool:
 func _process(delta: float) -> void:
 	if _player == null:
 		return
+	if _anim_stride > 1:
+		_anim_phase += 1
+		if _anim_phase % _anim_stride != 0:
+			return
+		delta *= float(_anim_stride)
+	Perf.begin("mob.anim")
 	_hover_time += delta
 	if _instance != null:
 		var hover := float(_data.get("hover", 0.0))
@@ -275,17 +335,21 @@ func _process(delta: float) -> void:
 				minf(1.0, delta * 8.0))
 	if _dead:
 		_advance_death(delta)
+		Perf.end()
 		return
 	if _attack_playing:
 		_seek_attack()
+		Perf.end()
 		return
 	if _hit_playing:
 		_hit_time += delta
 		if _hit_time >= _hit_duration:
 			_hit_playing = false
 			_select_locomotion()
+		Perf.end()
 		return
 	_select_locomotion()
+	Perf.end()
 
 
 func _seek_attack() -> void:
@@ -333,3 +397,14 @@ func _advance_death(delta: float) -> void:
 		_death_held = true
 		_player.seek(duration, true)
 		_player.pause()
+
+
+## Stops the clip writing bone tracks. The last pose stays on the rig, which is
+## what a body beyond the animation range shows: see `MobLod.ANIMATE_RANGE`.
+func set_frozen(frozen: bool) -> void:
+	set_process(not frozen)
+
+
+## Frames the sampler runs once every. `1` is every frame.
+func set_anim_stride(stride: int) -> void:
+	_anim_stride = maxi(1, stride)

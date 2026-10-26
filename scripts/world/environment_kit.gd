@@ -75,7 +75,11 @@ static func build(parent: Node3D, style: WorldStyle) -> Dictionary:
 	# Four splits give crisp trunk shadows near the player and still cover the
 	# whole draw distance; the visibility budget only shadows trees/props.
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	sun.directional_shadow_max_distance = float(sky_values.get("sun_shadow_distance", 110.0))
+	# Four splits over this range. It used to reach a hundred and ten metres,
+	# which cost a fifth of the frame's draw calls on shadow pass geometry
+	# nobody can pick out past the treeline; sixty still covers every weapon's
+	# useful range and the whole town square.
+	sun.directional_shadow_max_distance = float(sky_values.get("sun_shadow_distance", 60.0))
 	sun.directional_shadow_fade_start = 0.85
 	sun.shadow_bias = 0.04
 	sun.shadow_normal_bias = 1.5

@@ -21,8 +21,17 @@ const ENVELOPE := 100
 const PAYLOAD := MTU - ENVELOPE
 ## A Godot array encodes as this header plus each element's own bytes.
 const ARRAY_HEADER := 8
+## A packed float array encodes as this header plus four bytes per element.
+const PACKED_HEADER := 8
 
+## Encoded size of one value, identical to `var_to_bytes(value).size()`.
+## Packed float arrays are counted arithmetically: they are the mob snapshots,
+## they run in the hundreds per wave, and encoding each one just to weigh it
+## doubled the cost of sending it. `tests/net_limits_regression.gd` pins this
+## against Godot's own encoder.
 static func size(value: Variant) -> int:
+	if value is PackedFloat32Array:
+		return PACKED_HEADER + 4 * (value as PackedFloat32Array).size()
 	return var_to_bytes(value).size()
 
 ## Encoded size of one RPC's argument list, the same encoder the RPC sends.

@@ -29,6 +29,9 @@ const DodgeStep = preload("res://scripts/dodge_step.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const State = preload("res://scripts/player_state.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
+const MobGround = preload("res://scripts/mob_ground.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 
 const MAX_HEALTH := 100.0
 const GOLD := 14
@@ -62,6 +65,8 @@ var last_hitter := -1
 var stamina := Stamina.MAX
 var state := "IDLE"
 var targets: Array = []
+## The frontier world, for the analytic ground and navigation field.
+var terrain: Node3D
 var fallback_target
 var home := Vector3.ZERO
 var aggro_range := 30.0
@@ -69,6 +74,10 @@ var leash := 42.0
 var rig
 var combat
 var dodge
+var _ground: MobGround = MobGround.new()
+var _lod_stride := 1
+var _lod_phase := 0
+var _presenting := true
 
 var _main_item := "sword_short"
 var _target
@@ -100,6 +109,8 @@ func _ready() -> void:
 	collision_mask = 1
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
+	_ground.radius = 0.34
+	_ground.terrain = terrain if terrain != null else _parent_world()
 	_shape = CapsuleShape3D.new()
 	_shape.radius = BODY_RADIUS
 	_shape.height = BODY_HEIGHT
@@ -285,15 +296,25 @@ func _physics_process(delta: float) -> void:
 		return
 	if replica or not authoritative or not auto_ai:
 		return
-	dodge.advance(delta,is_on_floor())
-	_step_ai(delta,targets)
+	var nearest := _lod_distance()
+	_apply_presentation(nearest)
+	var stride := MobLod.stride_for(nearest)
+	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
+		return
+	if stride != _lod_stride:
+		_lod_stride = stride
+		_lod_phase = MobLod.phase(global_position, stride)
+	Perf.begin("clone.ai")
+	dodge.advance(delta * float(stride),_ground.grounded)
+	_step_ai(delta * float(stride),targets)
+	Perf.end()
 
 
 ## The delve drives wave members through this entry point.
 func step(delta: float, actors: Array = [], _peers: Array = []) -> void:
 	if not authoritative or replica or not alive:
 		return
-	dodge.advance(delta,is_on_floor())
+	dodge.advance(delta,_ground.grounded)
 	_step_ai(delta,actors)
 
 
@@ -344,11 +365,11 @@ func _step_ai(delta: float, candidates: Array) -> void:
 		if combat.start_block(direction):
 			_guard_hold = 0.30
 			_guard_cooldown = 0.9
-	if threat and not combat.blocking and _step_cooldown <= 0.0 and dodge.can_step(is_on_floor(),false):
+	if threat and not combat.blocking and _step_cooldown <= 0.0 and dodge.can_step(_ground.grounded,false):
 		var tangent := Vector3(-direction.z,0.0,direction.x)
 		if clone_id % 2 != 0:
 			tangent = -tangent
-		if dodge.try_step(tangent,is_on_floor(),false):
+		if dodge.try_step(tangent,_ground.grounded,false):
 			_step_cooldown = 1.6
 	var want_bow := distance > 9.0
 	if combat.attack_progress >= 0.999 and not combat.blocking:
@@ -372,21 +393,19 @@ func _apply_motion(delta: float, facing_direction: Vector3) -> void:
 		velocity.x = step_velocity.x
 		velocity.z = step_velocity.z
 	else:
-		var control := 26.0 if is_on_floor() else 8.0
+		var control := 26.0 if _ground.grounded else 8.0
 		velocity.x = move_toward(velocity.x,desired.x,control * delta)
 		velocity.z = move_toward(velocity.z,desired.z,control * delta)
-	if is_on_floor() and velocity.y <= 0.0:
+	if _ground.grounded and velocity.y <= 0.0:
 		velocity.y = -1.0
-	elif not is_on_floor():
+	elif not _ground.grounded:
 		velocity.y -= 18.0 * delta
 	if facing_direction.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-facing_direction.x,-facing_direction.z),minf(delta * 10.0,1.0))
-	var before := global_position
-	move_and_slide()
+	_ground.drive(self,delta)
 	position.x = clampf(position.x,-bounds,bounds)
 	position.z = clampf(position.z,-bounds,bounds)
-	var actual := (global_position - before) / maxf(delta,0.0001)
-	_present(actual)
+	_present(_ground.actual)
 
 
 func _present(actual: Vector3) -> void:
@@ -394,8 +413,8 @@ func _present(actual: Vector3) -> void:
 	rig.set_roll(-1.0,Vector3.FORWARD)
 	rig.set_slide(-1.0,Vector3.FORWARD)
 	rig.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
-	rig.set_locomotion(actual,is_on_floor())
-	combat.set_motion(actual,actual.length() > 0.4,is_on_floor())
+	rig.set_locomotion(actual,_ground.grounded)
+	combat.set_motion(actual,actual.length() > 0.4,_ground.grounded)
 
 
 func _bow_step(distance: float, direction: Vector3) -> void:
@@ -537,14 +556,16 @@ func stagger(seconds: float) -> void:
 	velocity.z = 0.0
 
 
-func snapshot() -> Dictionary:
+## A clone carries an animation block a packed float record has no room for,
+## so it keeps the dictionary shape while the mobs travel as `mob_wire` records.
+func snapshot(index := -1) -> Dictionary:
 	var rig_state: Array = rig.pack_animation_state(rig.get_animation_state()) if is_instance_valid(rig) else []
 	if attack_mode == "direct":
-		return {"kind":KIND,"id":clone_id,"role":"ranger","pos":global_position,"yaw":rotation.y,
+		return {"kind":KIND,"id":clone_id,"role":"ranger","i":index,"pos":global_position,"yaw":rotation.y,
 			"state":state,"time":_state_time,"health":health,"alive":alive,
 			"weapon":str(rig.weapon),"depth":depth,"max_health":max_health,"anim":rig_state}
-	return {"kind":KIND,"id":clone_id,"max_health":max_health,"weapon":str(rig.weapon),
-		"p":global_position,"y":rotation.y,"v":velocity,"g":is_on_floor(),
+	return {"kind":KIND,"id":clone_id,"i":index,"max_health":max_health,"weapon":str(rig.weapon),
+		"p":global_position,"y":rotation.y,"v":velocity,"g":_ground.grounded,
 		"s":state,"t":_state_time,"h":health,"a":alive,"x":Vector4(-1,0,0,-1),
 		"anim":rig_state}
 
@@ -725,3 +746,39 @@ func _floor_height(point: Vector3) -> float:
 	_floor_query.to = point - Vector3(0,2.6,0)
 	var hit := get_world_3d().direct_space_state.intersect_ray(_floor_query)
 	return float(hit.position.y) if not hit.is_empty() else global_position.y
+
+
+## The frontier world, when nobody handed one in: clones are children of the
+## scene that owns it.
+func _parent_world() -> Node3D:
+	var parent := get_parent()
+	if parent != null:
+		var candidate = parent.get("world")
+		if candidate is Node3D:
+			return candidate
+	return null
+
+
+## Distance to the closest ranger this clone could fight: its think rate.
+func _lod_distance() -> float:
+	var best := INF
+	if is_instance_valid(fallback_target):
+		best = global_position.distance_to(fallback_target.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_to(candidate.global_position))
+	return best
+
+
+## A distant clone stops drawing and its rig stops sampling animation; the
+## last pose stays. Only a real world culls this way.
+func _apply_presentation(distance: float) -> void:
+	if _body == null or terrain == null:
+		return
+	var live := MobLod.should_animate(distance)
+	if live == _presenting:
+		return
+	_presenting = live
+	_body.visible = live
+	if is_instance_valid(rig):
+		rig.set_physics_process(live)

@@ -35,6 +35,8 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const NetLimits = preload("res://scripts/net_limits.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const LagCompensation = preload("res://scripts/lag_compensation.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
+const MobWire = preload("res://scripts/mob_wire.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 ## A backstab needs a live body under the crosshair: frontier enemies sit on
@@ -286,6 +288,7 @@ func _ready() -> void:
 	_update_loadout()
 	_refresh_backpack()
 	_build_world_ui()
+	Perf.begin("spawn.mobs")
 	for record: Dictionary in world.enemy_spawns:
 		var enemy := Enemy.new()
 		enemy.kind = int(record.kind)
@@ -293,6 +296,7 @@ func _ready() -> void:
 		enemy.devil_weapon = str(record.get("weapon", "claw"))
 		enemy.position = record.position + Vector3(0, 0.12, 0)
 		enemy.player = player
+		enemy.terrain = world
 		enemy.safe_center = world.player_spawn
 		add_child(enemy)
 		enemy.defeated.connect(_on_enemy_defeated)
@@ -305,6 +309,7 @@ func _ready() -> void:
 		devil.mob_id = str(record.mob)
 		devil.position = record.position + Vector3(0, 0.12, 0)
 		devil.player = player
+		devil.terrain = world
 		devil.safe_center = world.player_spawn
 		add_child(devil)
 		devil.defeated.connect(_on_enemy_defeated)
@@ -315,6 +320,7 @@ func _ready() -> void:
 		forest.mob_id = str(record.mob)
 		forest.position = record.position + Vector3(0, 0.12, 0)
 		forest.player = player
+		forest.terrain = world
 		forest.safe_center = world.player_spawn
 		add_child(forest)
 		forest.defeated.connect(_on_enemy_defeated)
@@ -326,6 +332,7 @@ func _ready() -> void:
 		clone.name = "RangerClone%d" % index
 		clone.bounds = world.WORLD_LIMIT - 2.0
 		clone.fallback_target = player
+		clone.terrain = world
 		add_child(clone)
 		clone.configure(index,1,true,"scene")
 		clone.spawn_at(record.position + Vector3(0, 0.12, 0))
@@ -333,6 +340,7 @@ func _ready() -> void:
 		clone.attacked.connect(_on_enemy_attack)
 		clone.arrow_fired.connect(_on_mob_arrow)
 		enemies.append(clone)
+	Perf.end()
 	_enemies_by_index = enemies.duplicate()
 	_setup_network()
 	_update_camera(1.0)
@@ -537,12 +545,14 @@ func _drop_field_loot(item_id: String) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("main.physics")
 	if _link.held > 0:
 		_link.release(Time.get_ticks_msec()/1000.0)
 	if _net_diag:
 		_diag_step(delta)
 	if network_role == "client":
 		_client_step(delta)
+		Perf.end()
 		return
 	roll.advance(delta,player.is_on_floor())
 	step.advance(delta,player.is_on_floor())
@@ -655,9 +665,11 @@ func _physics_process(delta: float) -> void:
 	elif player.position.y < -25.0:
 		return_to_camp()
 	if _entering_scene:
+		Perf.end()
 		return
 	if network_role == "host":
 		_host_network_step(delta)
+	Perf.end()
 
 ## One line a second: the numbers that decide whether a session feels smooth.
 func _diag_step(delta: float) -> void:
@@ -2342,6 +2354,7 @@ func _client_step(delta: float) -> void:
 func _host_network_step(delta: float) -> void:
 	if _peer_slots.is_empty():
 		return
+	Perf.begin("net.host")
 	server_tick += 1
 	var bodies: Array[CharacterBody3D] = [player]
 	for seat in _seat_list:
@@ -2357,15 +2370,22 @@ func _host_network_step(delta: float) -> void:
 			_rescue_seat_from_hatch(seat)
 	# One second of mob poses, recorded before any client intent this tick can
 	# be resolved against them.
+	Perf.begin("net.lag")
 	_lag.record(server_tick,_enemies_by_index)
+	Perf.end()
 	_send_elapsed += delta
 	if _send_elapsed >= NET_TICK:
 		_send_elapsed = fmod(_send_elapsed,NET_TICK)
+		Perf.begin("net.seats")
 		_send_seat_snapshots()
+		Perf.end()
 	_enemy_elapsed += delta
 	if _enemy_elapsed >= ENEMY_TICK:
 		_enemy_elapsed = fmod(_enemy_elapsed,ENEMY_TICK)
+		Perf.begin("net.mobs")
 		_send_enemy_snapshots()
+		Perf.end()
+	Perf.end()
 
 
 ## Only the session authority may open the party's route down. A rider whose
@@ -2736,9 +2756,7 @@ func _send_enemy_snapshots() -> void:
 		var enemy = _enemies_by_index[index]
 		if not is_instance_valid(enemy) or not _enemy_relevant(enemy):
 			continue
-		var state: Dictionary = enemy.snapshot()
-		state["i"] = index
-		states.append(state)
+		states.append(enemy.snapshot(index))
 	# Byte-budgeted, not count-chunked: five busy mobs already encode past the
 	# clamped payload, so the packer decides how many ride in one datagram.
 	for batch in NetLimits.batches(states,[server_tick]):
@@ -2758,14 +2776,23 @@ func _world_mobs(tick: int, states: Array) -> void:
 func _apply_world_mobs(tick: int, states: Array) -> void:
 	_clock.ingest(tick,Time.get_ticks_msec()/1000.0)
 	for entry in states:
+		if entry is PackedFloat32Array:
+			var index := int(entry[MobWire.AT_INDEX])
+			if index < 0 or index >= _enemies_by_index.size():
+				continue
+			var enemy = _enemies_by_index[index]
+			if is_instance_valid(enemy):
+				enemy.apply_snapshot(entry,tick)
+			continue
+		# Ranger clones still carry their animation block as a dictionary.
 		if typeof(entry) != TYPE_DICTIONARY:
 			continue
-		var index := int(entry.get("i",-1))
-		if index < 0 or index >= _enemies_by_index.size():
+		var clone_index := int(entry.get("i",-1))
+		if clone_index < 0 or clone_index >= _enemies_by_index.size():
 			continue
-		var enemy = _enemies_by_index[index]
-		if is_instance_valid(enemy):
-			enemy.apply_snapshot(entry,tick)
+		var clone = _enemies_by_index[clone_index]
+		if is_instance_valid(clone):
+			clone.apply_snapshot(entry,tick)
 
 
 func _on_seat_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:

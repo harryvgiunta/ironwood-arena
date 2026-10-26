@@ -18,11 +18,25 @@ const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
+const MobGround = preload("res://scripts/mob_ground.gd")
+const MobSpace = preload("res://scripts/mob_space.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
+const MobWire = preload("res://scripts/mob_wire.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
 ## additions, not a difficulty spike. `kind` keeps the deterministic frontier
 ## loot rotation distinct from kinds 0..2.
+## How far a mob keeps from its neighbours, in metres.
+const SEPARATION := 1.35
+## Spacing is a soft constraint and costs a neighbour walk; ten hertz is more
+## than enough to keep a pack apart, so it is re-measured one frame in six and
+## the result reused. The phase is offset per mob so the work spreads across
+## frames instead of landing together.
+const SEPARATION_TICKS := 6
+## The gap a mob keeps from a ranger's capsule.
+const RANGER_CLEARANCE := 0.62
 const PROFILES := {
 	"hell_goat": {
 		"display": "Hellish goat man", "kind": 3,
@@ -78,8 +92,33 @@ const PROFILES := {
 
 var mob_id := "hell_goat"
 var profile: Dictionary = {}
+## The profile's numbers, typed and copied out of the dictionary once. Every
+## tick reads a dozen of them, and a member read is an order of magnitude
+## cheaper than a string-keyed dictionary lookup — with a hundred and thirty
+## bodies thinking thirty times a second that difference is milliseconds.
+var _reach := 1.6
+var _orbit := 3.0
+var _walk_speed := 1.4
+var _run_speed := 4.0
+var _strafe := 0.6
+var _windup := 0.45
+var _strike := 0.18
+var _recover := 0.55
+var _cooldown := 0.9
+var _lunge := 2.0
+var _turn := 6.0
+var _damage := 0.0
+var _behaviour := ""
+var _body_radius := 0.3
+var _body_height := 1.8
+var _sight := 0.0
+var _aim := 1.0
 var kind := 3
 var player: CharacterBody3D
+## The frontier world: supplies the analytic ground height and the navigation
+## field this mob walks against instead of paying a physics step. Tests that
+## build a mob in a bare scene leave it null and get a ray fallback.
+var terrain: Node3D
 var targets: Array[CharacterBody3D] = []
 var replica := false
 ## Buffered server states for the replica's delayed render (see `enemy.gd`).
@@ -110,19 +149,34 @@ var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
 var _target: CharacterBody3D
 var _senses := MobSenses.new()
+var _ground: MobGround = MobGround.new()
+## Cached spacing push and the frame it was measured on.
+var _push := Vector3.ZERO
+var _push_at := -100
+var _push_phase := 0
+## This mob's think rate: the stride it runs at and the offset that keeps it
+## from lining up with its neighbours.
+var _lod_stride := 1
+var _lod_phase := 0
+## Whether the rig is currently being animated and drawn.
+var _presenting := true
+var _anim_stride := 1
 var _attacker: Node3D
 
 
 func _ready() -> void:
+	Perf.begin("spawn.mob")
 	var table := _profiles()
 	if not table.has(mob_id):
 		push_error("Unknown mob id: " + mob_id)
+		Perf.end()
 		return
 	profile = (table[mob_id] as Dictionary).duplicate(true)
 	name = _node_prefix() + mob_id
 	kind = int(profile.kind)
 	max_health = float(profile.health)
 	health = max_health
+	_read_profile()
 	home = global_position
 	if is_instance_valid(player):
 		var facing := player.global_position - global_position
@@ -131,21 +185,27 @@ func _ready() -> void:
 			rotation.y = atan2(-facing.x, -facing.z)
 	collision_layer = 2
 	collision_mask = 1 | 2 | 4
+	# The body keeps its shape so blades, arrows and spells can find it; the
+	# ground motion below never asks the physics server to move it.
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
+	_ground.radius = _body_radius
+	_ground.terrain = terrain if terrain != null else _parent_world()
 	var shape := CapsuleShape3D.new()
-	shape.radius = float(profile.radius)
-	shape.height = maxf(float(profile.height), shape.radius * 2.0 + 0.02)
+	shape.radius = _body_radius
+	shape.height = maxf(_body_height, shape.radius * 2.0 + 0.02)
 	var collision := CollisionShape3D.new()
 	collision.shape = shape
 	collision.position.y = shape.height * 0.5
 	add_child(collision)
 	_body = Node3D.new()
 	add_child(_body)
+	Perf.begin("spawn.body")
 	_visual = _visual_script().new()
 	_visual.mob_id = mob_id
 	_visual.profile = profile
 	_body.add_child(_visual)
+	Perf.end()
 	add_to_group(_group_name())
 	# One shared group for every wilderness mob: a struck mob's cry reaches
 	# whatever is close enough to hear it.
@@ -153,9 +213,14 @@ func _ready() -> void:
 	_query.collision_mask = 1
 	_rng.seed = 7919 + int(absf(global_position.x) * 13.0) + int(absf(global_position.z) * 7.0)
 	_strafe_dir = 1.0 if (_rng.randi() & 1) == 0 else -1.0
+	_place_on_open_ground()
+	_push_phase = int(absf(global_position.x * 7.0 + global_position.z * 13.0)) % SEPARATION_TICKS
+	_lod_stride = MobLod.stride_for(_lod_distance())
+	_lod_phase = MobLod.phase(global_position, _lod_stride)
 	_attack_cooldown = _rng.randf_range(0.25, 0.85)
 	state = "IDLE"
 	_state_time = 0.0
+	Perf.end()
 
 
 ## The profile table and the identity hooks are virtual so a second mobset can
@@ -183,12 +248,35 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
+	# Presentation follows distance, not the think rate: a body far enough away
+	# keeps its last pose and stops drawing, which is most of the frame when a
+	# hundred of them are spread over the frontier.
+	var nearest := _lod_distance()
+	_apply_presentation(nearest)
+	# Think on this mob's stride. The tick integrates the time it skipped, so
+	# speeds, cooldowns and state timers stay in real time.
+	var stride := MobLod.stride_for(nearest)
+	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
+		return
+	if stride != _lod_stride:
+		_lod_stride = stride
+		_lod_phase = MobLod.phase(global_position, stride)
+	delta *= float(stride)
+	Perf.begin("mob.ai")
 	# Sight, not proximity, decides whether this mob is in a fight. Losing the
 	# view keeps the pursuit alive for `MEMORY_SECONDS`.
-	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
+	Perf.begin("mob.candidates")
+	var candidates := _candidates()
+	Perf.end()
+	Perf.begin("mob.senses")
+	var pursuit := _senses.step(self, candidates, delta, _sight_range(),
 		_eye_height(), Callable(self, "_is_hostile"))
+	Perf.end()
+	Perf.begin("mob.target")
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
+	Perf.end()
 	if not is_instance_valid(_target) and not pursuit:
+		Perf.end()
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
@@ -204,6 +292,7 @@ func _physics_process(delta: float) -> void:
 	# Only an aware mob turns toward its quarry. A calm mob keeps the facing it
 	# had, so walking up behind it stays possible.
 	_face_intent = Vector3.ZERO
+	Perf.begin("mob.state")
 	match state:
 		"IDLE":
 			if aggro:
@@ -222,36 +311,45 @@ func _physics_process(delta: float) -> void:
 				_circle(delta, distance, direction)
 		"WINDUP":
 			_face_intent = direction
-			if _state_time >= float(profile.windup):
+			if _state_time >= _windup:
 				_strike_direction = direction
 				_face_intent = direction
 				_struck = false
 				_enter("STRIKE")
 		"STRIKE":
 			_face_intent = _strike_direction
-			if not _struck and _state_time >= float(profile.strike) * 0.34:
+			if not _struck and _state_time >= _strike * 0.34:
 				_struck = true
 				_resolve_strike()
-			if _state_time >= float(profile.strike):
+			if _state_time >= _strike:
 				_enter("RECOVER")
-				_attack_cooldown = float(profile.cooldown)
+				_attack_cooldown = _cooldown
 		"RECOVER":
 			var retreat := -direction
 			var tangent := Vector3(-direction.z, 0.0, direction.x) * _strafe_dir
 			_move_intent = _steer((retreat + tangent * 0.65).normalized())
-			_move_speed = float(profile.walk_speed) * 0.75
+			_move_speed = _walk_speed * 0.75
 			_face_intent = direction
-			if _state_time >= float(profile.recover):
+			if _state_time >= _recover:
 				_enter("CIRCLE")
 		"STAGGER":
 			if _state_time >= _stagger_duration:
 				_enter("CIRCLE")
 		"DEAD":
+			Perf.end()
 			return
+	Perf.end()
+	Perf.begin("mob.separate")
 	_separate()
+	Perf.end()
+	Perf.begin("mob.drive")
 	_drive(delta)
-	_visual.set_motion(get_real_velocity(), is_on_floor())
+	Perf.end()
+	Perf.begin("mob.visual")
+	_visual.set_motion(_ground.actual, _ground.grounded)
 	_visual.set_combat(state, _state_time)
+	Perf.end()
+	Perf.end()
 
 
 func _enter(next_state: String, reset_time := true) -> void:
@@ -265,7 +363,7 @@ func _return_home(delta: float) -> void:
 	offset.y = 0.0
 	if offset.length() > 1.2:
 		_move_intent = _steer(offset.normalized())
-		_move_speed = float(profile.walk_speed)
+		_move_speed = _walk_speed
 		_face_intent = _move_intent
 	elif state != "IDLE":
 		_enter("IDLE")
@@ -276,28 +374,28 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	if not _senses.seen:
 		_hunt(delta)
 		return
-	var reach := float(profile.reach)
+	var reach := _reach
 	if distance <= reach + 1.15 and _attack_cooldown <= 0.0:
 		_enter("WINDUP")
 		return
-	var behaviour := str(profile.behaviour)
+	var behaviour := _behaviour
 	if behaviour == "brute" or behaviour == "sentinel":
 		if distance > reach * 1.30:
 			_move_intent = _steer(direction)
-			_move_speed = float(profile.run_speed) if distance > reach * 2.2 else float(profile.walk_speed)
+			_move_speed = _run_speed if distance > reach * 2.2 else _walk_speed
 			_face_intent = _move_intent
 		else:
 			var tangent := Vector3(-direction.z, 0.0, direction.x) * _strafe_dir
 			_move_intent = _steer(tangent)
-			_move_speed = float(profile.walk_speed) * 0.4
+			_move_speed = _walk_speed * 0.4
 			_face_intent = direction
 		return
-	var orbit := float(profile.orbit)
+	var orbit := _orbit
 	var closing := _attack_cooldown <= 0.0
 	var radius := maxf(1.1, reach * 0.82) if closing else orbit
 	var angle := atan2(global_position.z - _target.global_position.z,
 		global_position.x - _target.global_position.x)
-	angle += _strafe_dir * delta * float(profile.strafe) * (1.15 + 0.25 * sin(_state_time * 0.9))
+	angle += _strafe_dir * delta * _strafe * (1.15 + 0.25 * sin(_state_time * 0.9))
 	var ring := _target.global_position + Vector3(cos(angle), 0.0, sin(angle)) * radius
 	var offset := ring - global_position
 	offset.y = 0.0
@@ -305,9 +403,9 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	if distance > orbit + 3.5:
 		desired = direction
 	_move_intent = _steer(desired)
-	var desired_speed := float(profile.run_speed) if distance > orbit + 2.0 else float(profile.walk_speed)
+	var desired_speed := _run_speed if distance > orbit + 2.0 else _walk_speed
 	if closing:
-		desired_speed = float(profile.run_speed) if distance > radius + 1.4 else float(profile.walk_speed)
+		desired_speed = _run_speed if distance > radius + 1.4 else _walk_speed
 	_move_speed = desired_speed
 	_face_intent = direction
 
@@ -319,7 +417,7 @@ func _hunt(delta: float) -> void:
 	offset.y = 0.0
 	if offset.length() > MobSenses.ARRIVE_DISTANCE:
 		_move_intent = _steer(offset.normalized())
-		_move_speed = float(profile.run_speed)
+		_move_speed = _run_speed
 		_face_intent = _move_intent
 		return
 	# Standing over the last sighting: scan the ground instead of freezing.
@@ -330,10 +428,10 @@ func _hunt(delta: float) -> void:
 func _resolve_strike() -> void:
 	var to_target := _target.global_position - global_position
 	to_target.y = 0.0
-	var spent := _state_time / maxf(0.01, float(profile.strike))
-	var reach := float(profile.reach) * (1.0 + 0.18 * spent)
+	var spent := _state_time / maxf(0.01, _strike)
+	var reach := _reach * (1.0 + 0.18 * spent)
 	if to_target.length() <= reach and absf(_target.global_position.y - global_position.y) < 2.4:
-		attacked.emit(self, float(profile.damage), _target)
+		attacked.emit(self, _damage, _target)
 
 func _resolve_target() -> CharacterBody3D:
 	var nearest := INF
@@ -362,11 +460,11 @@ func _candidates() -> Array:
 
 ## How far this profile can see. Distance alone never starts a fight.
 func _sight_range() -> float:
-	return float(profile.get("sight", 0.0))
+	return _sight
 
 
 func _eye_height() -> float:
-	return maxf(0.7, float(profile.get("height", 1.8)) * MobSenses.EYE_HEIGHT_FRACTION)
+	return maxf(0.7, _body_height * MobSenses.EYE_HEIGHT_FRACTION)
 
 
 ## Huntable rangers: alive and outside the town's safe ring.
@@ -377,54 +475,79 @@ func _is_hostile(candidate: Node3D) -> bool:
 
 
 func _separate() -> void:
-	var push := Vector3.ZERO
-	for other in get_tree().get_nodes_in_group(_group_name()):
-		if other == self or not is_instance_valid(other) or not bool(other.get("alive")):
-			continue
-		var offset: Vector3 = global_position - other.global_position
-		offset.y = 0.0
-		var gap := offset.length()
-		if gap > 0.001 and gap < 1.35:
-			push += offset / gap * (1.35 - gap)
+	var frame := Engine.get_physics_frames()
+	if (frame + _push_phase) % SEPARATION_TICKS == 0 and frame != _push_at:
+		_push_at = frame
+		_measure_push()
+	var push := _push
 	if push.length_squared() > 0.0001:
 		if _move_intent.length_squared() > 0.0001:
 			_move_intent = (_move_intent + push * 0.85).normalized()
 		else:
 			_move_intent = push.normalized()
-			_move_speed = maxf(_move_speed, float(profile.walk_speed) * 0.35)
+			_move_speed = maxf(_move_speed, _walk_speed * 0.35)
+
+
+## The neighbour walk itself: every mob inside `SEPARATION`, plus the rangers'
+## capsules, against the shared bucket grid.
+func _measure_push() -> void:
+	var push := Vector3.ZERO
+	MobSpace.refresh(get_tree())
+	MobSpace.gather(global_position.x, global_position.z)
+	var other: Node3D = MobSpace.next_body()
+	while other != null:
+		if other != self and bool(other.get("alive")) != false:
+			var offset: Vector3 = global_position - other.global_position
+			offset.y = 0.0
+			var gap := offset.length()
+			if gap > 0.001 and gap < SEPARATION:
+				push += offset / gap * (SEPARATION - gap)
+		other = MobSpace.next_body()
+	# Rangers are not on the grid: a mob keeps out of a body it can no longer
+	# collide with now that nothing steps physics for it.
+	for candidate in _candidates():
+		if not is_instance_valid(candidate):
+			continue
+		var away: Vector3 = global_position - candidate.global_position
+		away.y = 0.0
+		var reach := _body_radius + RANGER_CLEARANCE
+		var gap := away.length()
+		if gap > 0.001 and gap < reach:
+			push += away / gap * (reach - gap) * 1.6
+	_push = push
 
 
 func _drive(delta: float) -> void:
 	var desired := _move_intent * _move_speed
 	if state == "STRIKE":
-		var spent := clampf(_state_time / maxf(0.01, float(profile.strike)), 0.0, 1.0)
-		desired = _strike_direction * float(profile.lunge) * (1.0 - 0.62 * spent)
+		var spent := clampf(_state_time / maxf(0.01, _strike), 0.0, 1.0)
+		desired = _strike_direction * _lunge * (1.0 - 0.62 * spent)
 	elif state == "WINDUP" or state == "STAGGER":
 		desired = Vector3.ZERO
-	var control := 26.0 if is_on_floor() else 7.0
-	velocity.x = move_toward(velocity.x, desired.x, control * delta)
-	velocity.z = move_toward(velocity.z, desired.z, control * delta)
-	if is_on_floor() and velocity.y <= 0.0:
-		velocity.y = -1.0
-	elif not is_on_floor():
-		velocity.y -= 18.0 * delta
+	var control := 26.0 if _ground.grounded else 7.0
 	if _face_intent.length_squared() > 0.0001 and state != "STAGGER":
 		rotation.y = lerp_angle(rotation.y, atan2(-_face_intent.x, -_face_intent.z),
-			minf(delta * float(profile.turn), 1.0))
-	move_and_slide()
+			minf(delta * _turn, 1.0))
+	Perf.begin("mob.slide")
+	_ground.step(self, delta, desired, control)
+	Perf.end()
 
 
 func _steer(direction: Vector3) -> Vector3:
 	if direction.length_squared() < 0.0001:
 		return direction
-	_query.from = global_position + Vector3(0.0, float(profile.height) * 0.45, 0.0)
+	Perf.begin("mob.steer")
+	_query.from = global_position + Vector3(0.0, _body_height * 0.45, 0.0)
 	_query.to = _query.from + direction.normalized() * 1.55
 	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
+		Perf.end()
 		return direction
 	var left := direction.rotated(Vector3.UP, 1.0)
 	_query.to = _query.from + left * 1.7
 	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
+		Perf.end()
 		return left
+	Perf.end()
 	return direction.rotated(Vector3.UP, -1.0)
 
 
@@ -435,8 +558,8 @@ func stagger(seconds: float) -> void:
 	_state_time = 0.0
 	_stagger_duration = maxf(0.0, seconds)
 	_struck = true
-	velocity.x = 0.0
-	velocity.z = 0.0
+	_ground.velocity.x = 0.0
+	_ground.velocity.z = 0.0
 
 
 func note_impact(force: Vector3) -> void:
@@ -499,10 +622,11 @@ func _enter_dead(announce: bool) -> void:
 	state = "DEAD"
 	_struck = true
 	var fall := _impact_force if _impact_force.length_squared() > 0.0001 \
-		else CorpsePhysics.fall_direction(self, velocity)
+		else CorpsePhysics.fall_direction(self, _ground.velocity)
 	set_deferred("collision_layer", 0)
 	set_deferred("collision_mask", 1)
 	velocity = Vector3.ZERO
+	_ground.velocity = Vector3.ZERO
 	if is_instance_valid(_visual):
 		_visual.die(fall)
 	if announce:
@@ -511,26 +635,18 @@ func _enter_dead(announce: bool) -> void:
 	CorpseHold.hold(self, _body)
 
 
-func snapshot() -> Dictionary:
-	return {
-		"p": global_position,
-		"y": rotation.y,
-		"v": velocity,
-		"g": is_on_floor(),
-		"s": state,
-		"t": _state_time,
-		"h": health,
-		"a": alive,
-		"x": Vector4.ZERO,
-	}
+## One body's wire record: see `scripts/mob_wire.gd` for the slot layout.
+func snapshot(index := -1) -> PackedFloat32Array:
+	return MobWire.pack(index, global_position, _ground.velocity, rotation.y,
+		_state_time, health, _ground.grounded, alive, state)
 
 
 ## Feeds one authoritative pose into the render buffer. The first packet and
 ## any teleport restart the buffer; everything else interpolates.
-func _ingest_pose(state: Dictionary, tick: int) -> void:
-	var point: Vector3 = state.p
-	var yaw := float(state.y)
-	var speed: Vector3 = state.v
+func _ingest_pose(state: PackedFloat32Array, tick: int) -> void:
+	var point := MobWire.position_of(state)
+	var yaw: float = state[MobWire.AT_YAW]
+	var speed := MobWire.velocity_of(state)
 	var at := tick if tick >= 0 else _timeline.newest_tick() + 1
 	var now := Time.get_ticks_msec()/1000.0
 	if not _received_pose:
@@ -554,17 +670,17 @@ func _process(delta: float) -> void:
 
 ## Presentation-side mirror of the host's mob: the host owns AI, damage and
 ## gold, so a replica only replays the snapshot it was handed.
-func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
+func apply_snapshot(state: PackedFloat32Array, tick: int = -1) -> void:
 	var previous_health := health
 	var was_alive := alive
 	_ingest_pose(state,tick)
-	self.state = state.s
-	_state_time = state.t
-	health = state.h
-	alive = state.a
-	velocity = state.v
+	self.state = MobWire.state_of(state)
+	_state_time = state[MobWire.AT_STATE_TIME]
+	health = state[MobWire.AT_HEALTH]
+	alive = MobWire.alive_of(state)
+	_ground.velocity = MobWire.velocity_of(state)
 	if is_instance_valid(_visual):
-		_visual.set_motion(velocity, state.g)
+		_visual.set_motion(_ground.velocity, MobWire.grounded_of(state))
 		_visual.set_combat(self.state, _state_time)
 	if health < previous_health:
 		var applied: float = previous_health - health
@@ -576,7 +692,7 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 
 
 func get_aim_position() -> Vector3:
-	return global_position + Vector3(0.0, float(profile.get("aim", 1.0)), 0.0)
+	return global_position + Vector3(0.0, _aim, 0.0)
 
 
 ## The imported body that the blood field measures for cloth stains.
@@ -622,3 +738,85 @@ func head_hit_profile() -> Vector2:
 
 func is_dead() -> bool:
 	return not alive
+
+
+## The frontier world, when nobody handed one in: mobs are children of the
+## scene that owns it. Null outside a real world, which the locomotion helper
+## answers with a floor ray.
+func _parent_world() -> Node3D:
+	var parent := get_parent()
+	if parent != null:
+		var candidate = parent.get("world")
+		if candidate is Node3D:
+			return candidate
+	return null
+
+
+## Distance to the closest ranger this mob could hunt: what decides its stride.
+func _lod_distance() -> float:
+	var best := INF
+	if is_instance_valid(player):
+		best = global_position.distance_to(player.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_to(candidate.global_position))
+	return best
+
+
+## Freezes the rig beyond the animation range. Only a real world does this: a
+## mob built in a bare test scene keeps animating so its clip can be read.
+func _apply_presentation(distance: float) -> void:
+	if _body == null or terrain == null:
+		return
+	var live := MobLod.should_animate(distance)
+	if live != _presenting:
+		_presenting = live
+		_body.visible = live
+		if is_instance_valid(_visual):
+			_visual.set_frozen(not live)
+	var stride := MobLod.anim_stride(distance)
+	if stride != _anim_stride:
+		_anim_stride = stride
+		if is_instance_valid(_visual):
+			_visual.set_anim_stride(stride)
+
+
+## An authored placement can land in a cell the navigation field marks as
+## taken (a boulder, a tree, a market stall). A body is nudged onto the nearest
+## open ground instead of starting inside an obstacle.
+func _place_on_open_ground() -> void:
+	if terrain == null or not terrain.is_blocked(global_position.x, global_position.z,
+			_body_radius):
+		return
+	for radius in [1.0, 2.0, 3.0, 4.5, 6.0]:
+		for step in 8:
+			var angle := float(step) * TAU / 8.0
+			var x: float = global_position.x + cos(angle) * radius
+			var z: float = global_position.z + sin(angle) * radius
+			if not terrain.is_blocked(x, z, _body_radius):
+				global_position = Vector3(x, terrain.terrain_height(x, z), z)
+				home = global_position
+				return
+
+
+## Copies the profile's numbers into typed fields. `profile` stays the authored
+## table (visuals and rewards still read it), but nothing on the tick path
+## looks a key up.
+func _read_profile() -> void:
+	_reach = float(profile.get("reach", 1.6))
+	_orbit = float(profile.get("orbit", 3.0))
+	_walk_speed = float(profile.get("walk_speed", 1.4))
+	_run_speed = float(profile.get("run_speed", 4.0))
+	_strafe = float(profile.get("strafe", 0.6))
+	_windup = float(profile.get("windup", 0.45))
+	_strike = float(profile.get("strike", 0.18))
+	_recover = float(profile.get("recover", 0.55))
+	_cooldown = float(profile.get("cooldown", 0.9))
+	_lunge = float(profile.get("lunge", 2.0))
+	_turn = float(profile.get("turn", 6.0))
+	_damage = float(profile.get("damage", 0.0))
+	_behaviour = str(profile.get("behaviour", ""))
+	_body_radius = float(profile.get("radius", 0.3))
+	_body_height = float(profile.get("height", 1.8))
+	_sight = float(profile.get("sight", 0.0))
+	_aim = float(profile.get("aim", 1.0))

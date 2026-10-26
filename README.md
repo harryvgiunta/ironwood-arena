@@ -412,6 +412,16 @@ Fighters no longer hard-collide with each other. Their capsules have a **soft se
 
 The title menu and arena lobby remember the **last player name, host address, UDP port and join mode** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values.
 
+## Performance
+
+A monster no longer pays for a physics step. The frontier's terrain is an analytic height field and its props are marked in a square-metre navigation grid, so a mob's next step is a few array reads instead of a **~90 µs** `move_and_slide` — the single largest cost a busy frontier frame used to carry. Mobs keep their collision shape on the hit layer, so blades, arrows and spells still find them.
+
+Mobs also think on a **stride**: every second physics tick inside 22 m, every fourth out to 55 m, every twelfth beyond, with the decimated tick scaling `delta` so speeds, cooldowns and the sight memory stay in real time. Their rigs stop drawing and stop writing bone tracks past **45 m**, and animate every other frame from **12 m**. Spacing reads a shared square-metre bucket grid instead of scanning every wilderness mob.
+
+Mob snapshots travel as **fifteen floats** (68 bytes) instead of a nine-key dictionary (244 bytes): 133 mobs in view ship in ~11 datagrams a send instead of 35, which is a third of the upload and the difference between a host on a home connection keeping up and dropping the snapshots that own the smoothness. The sun's shadow range is **60 m**, which still covers every weapon's useful range and the whole town square.
+
+`tests/perf_suite.gd` measures all of it — the shipped frontier, thirty monsters spawned at once, a hundred fighting around an invulnerable ranger, and the host's replication path — and `docs/performance.md` records the numbers, the method and what is left.
+
 ## Blood and wounds
 
 This is an 18+ game: unmitigated damage now leaves persistent gore. **Every mob bleeds** — the Briar wolf, cinder devil packs, the five imported devils and the delve devils all take body stains, floor spatter and a death pool; the ranger does too. A real contact throws a spray of droplets from the wound, flings smaller drops onto the ground and walls around the victim, speckles the floor beneath it, soaks blood into the victim's clothes, and marks the attacker: a drawn blade takes a coating, a claw, paw or muzzle takes a soak on the limb that struck, and an arm's-length melee kill throws the victim's blood back over the killer's chest and face. Lethal blows add an arterial burst and a growing pool under the corpse that stays for as long as the body does. Blocked, parried and weak-blocked hits draw no impact spray; only weak blocks still leave the half damage's wound. A defeated body then **lies where it fell for five minutes** (`scripts/corpse_hold.gd`) holding its authored death pose, before a short dissolve frees it.

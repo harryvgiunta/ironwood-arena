@@ -103,13 +103,17 @@ func run() -> void:
 	print("NET_LIMITS_ACK_BYTES ", NetLimits.message_size([1,0,acked]), " PAYLOAD ", NetLimits.PAYLOAD)
 	check(NetLimits.fits([1,0,acked]), "The lag-compensation acknowledgement fits the payload budget")
 
+	# The packed-size shortcut must agree with Godot's own encoder exactly.
+	var probe := PackedFloat32Array([1.5, 2.5, 3.5, 0.0, -1.25])
+	check(NetLimits.size(probe) == var_to_bytes(probe).size(),
+		"The packed float size shortcut matches the engine encoder")
+
 	var heaviest := 0
 	var kinds := {}
 	for enemy in game.enemies:
 		if not is_instance_valid(enemy):
 			continue
-		var snapshot: Dictionary = enemy.snapshot()
-		snapshot["i"] = int(kinds.size())
+		var snapshot = enemy.snapshot(int(kinds.size()))
 		var bytes := NetLimits.message_size([1,[snapshot]])
 		heaviest = maxi(heaviest,bytes)
 		kinds[int(enemy.get("kind"))] = true
@@ -125,8 +129,7 @@ func run() -> void:
 	for enemy in game.enemies:
 		if not is_instance_valid(enemy):
 			continue
-		var snapshot: Dictionary = enemy.snapshot()
-		snapshot["i"] = pack_source.size()
+		var snapshot = enemy.snapshot(pack_source.size())
 		pack_source.append(snapshot)
 		if pack_source.size() == 5:
 			break

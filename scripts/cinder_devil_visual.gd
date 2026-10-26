@@ -14,6 +14,7 @@ extends Node3D
 ## here rather than inferred from the asset.
 
 const Dagger = preload("res://scripts/dagger.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const Sword = preload("res://scripts/sword.gd")
 const Bow = preload("res://scripts/bow.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
@@ -49,6 +50,9 @@ const SHOOT_WINDUP := 0.30
 const SHOOT_RECOVER := 0.22
 
 var _instance: Node3D
+## Frames per animation step; see `set_anim_stride`.
+var _anim_stride := 1
+var _anim_phase := 0
 var _player: AnimationPlayer
 var _skeleton: Skeleton3D
 var _head_bone := -1
@@ -293,6 +297,17 @@ func get_bow_origin() -> Vector3:
 
 
 func _process(delta: float) -> void:
+	if _anim_stride > 1:
+		_anim_phase += 1
+		if _anim_phase % _anim_stride != 0:
+			return
+		delta *= float(_anim_stride)
+	Perf.begin("mob.anim")
+	_sample(delta)
+	Perf.end()
+
+
+func _sample(delta: float) -> void:
 	if _player == null:
 		return
 	if _dead:
@@ -419,3 +434,13 @@ func _advance_death(delta: float) -> void:
 		_player.pause()
 	if _instance != null:
 		_instance.rotation = _instance.rotation.lerp(Vector3(0.0, 0.0, 0.0), minf(1.0, delta * 6.0))
+
+
+## Stops the clip writing bone tracks. The last pose stays on the rig, which is
+## what a body beyond the animation range shows: see `MobLod.ANIMATE_RANGE`.
+func set_frozen(frozen: bool) -> void:
+	set_process(not frozen)
+
+
+func set_anim_stride(stride: int) -> void:
+	_anim_stride = maxi(1, stride)

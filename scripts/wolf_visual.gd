@@ -5,6 +5,7 @@ extends Node3D
 ## authored clips and hands the dead skeleton to the shared corpse ragdoll.
 
 const Hitbox = preload("res://scripts/hitbox.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const WOLF_SCENE := preload("res://assets/characters/ironwood_wolf.glb")
 const IDLE_CLIP := "Wolf_Idle_Loop"
@@ -19,6 +20,9 @@ const DEATH_DURATION := 0.45
 const MOVE_THRESHOLD := 0.18
 
 var _player: AnimationPlayer
+## Frames per animation step; see `set_anim_stride`.
+var _anim_stride := 1
+var _anim_phase := 0
 var _skeleton: Skeleton3D
 var _head_bone := -1
 var _clip := ""
@@ -102,6 +106,17 @@ func is_dead() -> bool:
 
 
 func _process(delta: float) -> void:
+	if _anim_stride > 1:
+		_anim_phase += 1
+		if _anim_phase % _anim_stride != 0:
+			return
+		delta *= float(_anim_stride)
+	Perf.begin("mob.anim")
+	_sample(delta)
+	Perf.end()
+
+
+func _sample(delta: float) -> void:
 	if _player == null:
 		return
 	if _dead:
@@ -146,3 +161,13 @@ func _advance_death(delta: float) -> void:
 		_death_held = true
 		_player.seek(DEATH_DURATION, true)
 		_player.pause()
+
+
+## Stops the clip writing bone tracks. The last pose stays on the rig, which is
+## what a body beyond the animation range shows: see `MobLod.ANIMATE_RANGE`.
+func set_frozen(frozen: bool) -> void:
+	set_process(not frozen)
+
+
+func set_anim_stride(stride: int) -> void:
+	_anim_stride = maxi(1, stride)

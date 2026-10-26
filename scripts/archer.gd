@@ -8,6 +8,7 @@ signal melee_started(hand: String)
 signal melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3, current_base: Vector3, current_tip: Vector3, radius: float)
 
 const Geo = preload("res://scripts/geo.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const Bow = preload("res://scripts/bow.gd")
 const Sword = preload("res://scripts/sword.gd")
 const Dagger = preload("res://scripts/dagger.gd")
@@ -1666,7 +1667,9 @@ func get_blade_tip(hand: String = "") -> Vector3:
 	return active_sword.to_global(Vector3(0,0,-float(SWORD_DATA[sword_index].length)-0.09))
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("rig")
 	advance_animation(delta)
+	Perf.end()
 
 func advance_animation(delta: float) -> void:
 	if not _built:

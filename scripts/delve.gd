@@ -13,6 +13,7 @@ extends Node3D
 
 const Actor = preload("res://scripts/delve_actor.gd")
 const Devil = preload("res://scripts/delve_devil.gd")
+const SpeciesVisual = preload("res://scripts/devil_mob_visual.gd")
 const RangerClone = preload("res://scripts/ranger_clone.gd")
 const LootRules = preload("res://scripts/loot_rules.gd")
 const Chest = preload("res://scripts/delve_chest.gd")
@@ -72,6 +73,8 @@ const CLONE_MAX := 4
 ## Cycle one's plain ladder keeps the old imps-to-devils ratio (16:10).
 const CYCLE_ONE_IMP_SHARE := 0.62
 const SPAWN_CURVE := 0.6
+## Bodies the wave may add to the room in one frame.
+const SPAWN_PER_FRAME := 3
 const SPAWN_PLAYER_CLEARANCE := 3.0
 const SPAWN_MUTUAL_CLEARANCE := 1.6
 const DROP_LAND_Y := 1.5
@@ -171,6 +174,8 @@ func _ready() -> void:
 	world = World.new()
 	add_child(world)
 	world.set_sealed(false)
+	# Warm the imported species before the first wave needs them.
+	SpeciesVisual.warm(SpeciesVisual.SCENES.values())
 	for index in 4:
 		var actor := Actor.new()
 		actor.slot = index
@@ -2268,12 +2273,17 @@ func _advance_host_state(delta: float) -> void:
 		"WAVE":
 			_wave_elapsed += delta
 			_wave_clock += delta * spawn_time_scale
-			while _wave_cursor < _wave_plan.size():
+			# A body costs about a millisecond to enter the tree, so the wave
+			# budget drains over frames instead of landing in one: the entries
+			# due now that do not fit wait for the next frame.
+			var budget := SPAWN_PER_FRAME
+			while budget > 0 and _wave_cursor < _wave_plan.size():
 				var entry: Dictionary = _wave_plan[_wave_cursor]
 				if float(entry.get("at",0.0)) > _wave_clock:
 					break
 				_spawn_devil(entry)
 				_wave_cursor += 1
+				budget -= 1
 		"CLEARED":
 			if chest_ready:
 				return

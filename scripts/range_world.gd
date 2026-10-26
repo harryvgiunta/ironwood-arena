@@ -5,6 +5,7 @@ const Geo = preload("res://scripts/geo.gd")
 const WorldStyleKit = preload("res://scripts/world/world_style.gd")
 const TreeKit = preload("res://scripts/world/tree_kit.gd")
 const WorldScatter = preload("res://scripts/world/scatter.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const GrassField = preload("res://scripts/world/grass_field.gd")
 const WorldEnvironmentKit = preload("res://scripts/world/environment_kit.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
@@ -12,6 +13,15 @@ const WORLD_LIMIT := 145.0
 const GRID_STEP := 2.0
 const GRID_CELLS := 145
 const GRID_SIDE := GRID_CELLS + 1
+## The mob navigation field: one byte per square metre, marking the cells a
+## walking body cannot enter. Mob AI moves against this instead of paying a
+## physics query per body per frame (see `MobGround`).
+const NAV_HALF := 150
+const NAV_SIDE := NAV_HALF * 2
+## Only obstacles that actually stand in a body's way are marked: a roof panel
+## above head height never blocks a walk, and a kerb is stepped over.
+const NAV_STEP_UP := 0.4
+const NAV_HEAD := 1.4
 const BRIDGE_HEIGHT := 3.0
 const TREE_CANDIDATES := 1120
 const TREE_CHUNK := 44.0
@@ -45,6 +55,7 @@ var _routes: Array[PackedVector3Array] = [
 	PackedVector3Array([Vector3(-15, 3, 21), Vector3(0, 3, 22), Vector3(15, 3, 21)])
 ]
 var _heights := PackedFloat32Array()
+var _nav := PackedByteArray()
 var _rng := RandomNumberGenerator.new()
 var _solids: StaticBody3D
 var _wood: StandardMaterial3D
@@ -82,6 +93,7 @@ func _ready() -> void:
 	_solids.collision_layer = 1
 	_solids.collision_mask = 0
 	add_child(_solids)
+	Perf.begin("world.build")
 	_build_lighting()
 	_build_terrain()
 	_build_map_data()
@@ -101,6 +113,7 @@ func _ready() -> void:
 	_build_rocks()
 	_build_ground_cover()
 	_build_signposts()
+	Perf.end()
 	generation_stats["terrain_vertices"] = GRID_SIDE * GRID_SIDE
 	generation_stats["terrain_triangles"] = (GRID_CELLS * GRID_CELLS - 1) * 2
 	generation_stats["nodes"] = _count_nodes(self)
@@ -309,7 +322,7 @@ func _box_collision(parent: Node3D, size: Vector3, point: Vector3, angle: float 
 	var collision := CollisionShape3D.new()
 	collision.shape = shape
 	collision.transform = parent.transform * Transform3D(Basis(Vector3.UP, angle), point) if parent != self else Transform3D(Basis(Vector3.UP, angle), point)
-	_solids.add_child(collision)
+	_add_solid(collision)
 
 
 func _solid_box(parent: Node3D, size: Vector3, point: Vector3, material: Material, angle: float = 0.0) -> MeshInstance3D:
@@ -566,7 +579,7 @@ func _build_house(point: Vector2, angle: float, label: String) -> Node3D:
 		var collision := CollisionShape3D.new()
 		collision.shape = shape
 		collision.transform = house.transform * roof_panel.transform
-		_solids.add_child(collision)
+		_add_solid(collision)
 	_solid_box(house, Vector3(0.85, 2.0, 0.85), Vector3(2.1, 4.9, 1.1), _stone)
 	for x in [-2.2, 2.2]:
 		Geo.box(house, Vector3(1.1, 1.15, 0.08), Vector3(x, 2.05, -3.19), _timber)
@@ -914,7 +927,7 @@ func _build_woodland() -> void:
 		var collision := CollisionShape3D.new()
 		collision.shape = shape
 		collision.position = base + Vector3(0, trunk_height * 0.5, 0)
-		_solids.add_child(collision)
+		_add_solid(collision)
 		tree_count += 1
 	# Batch each species/variant pair once; WorldScatter splits it into 44 m chunks.
 	var variant_total := 0
@@ -1058,7 +1071,7 @@ func _build_rocks() -> void:
 		var collision := CollisionShape3D.new()
 		collision.shape = shape
 		collision.position = xform.origin
-		_solids.add_child(collision)
+		_add_solid(collision)
 	for index in range(3):
 		WorldScatter.batch(self, "Boulder_%d" % index, variants[index], _rock_material, boulders[index], 48.0,
 			{"cast_shadow": true})
@@ -1142,3 +1155,92 @@ func _count_nodes(node: Node) -> int:
 	for child in node.get_children():
 		count += _count_nodes(child)
 	return count
+
+
+## Records an obstacle's footprint. Every solid in the frontier is added
+## through here, so the field cannot drift from the colliders the player feels.
+func _add_solid(collision: CollisionShape3D) -> void:
+	_solids.add_child(collision)
+	_mark_nav(collision)
+
+
+## Marks the cells covered by one solid, skipping anything a walking body would
+## step under or over.
+func _mark_nav(collision: CollisionShape3D) -> void:
+	var shape := collision.shape
+	if shape == null:
+		return
+	if _nav.is_empty():
+		_nav.resize(NAV_SIDE * NAV_SIDE)
+	var box: AABB = collision.transform * _shape_bounds(shape)
+	if box.size == Vector3.ZERO:
+		return
+	var min_x := maxi(int(floor(box.position.x)) + NAV_HALF, 0)
+	var max_x := mini(int(ceil(box.end.x)) + NAV_HALF, NAV_SIDE - 1)
+	var min_z := maxi(int(floor(box.position.z)) + NAV_HALF, 0)
+	var max_z := mini(int(ceil(box.end.z)) + NAV_HALF, NAV_SIDE - 1)
+	for iz in range(min_z, max_z + 1):
+		var z := float(iz - NAV_HALF) + 0.5
+		for ix in range(min_x, max_x + 1):
+			var x := float(ix - NAV_HALF) + 0.5
+			var ground := terrain_height(x, z)
+			if box.end.y <= ground + NAV_STEP_UP or box.position.y >= ground + NAV_HEAD:
+				continue
+			_nav[iz * NAV_SIDE + ix] = 1
+
+
+## True when a body of `radius` centred here would overlap a marked cell.
+func is_blocked(x: float, z: float, radius: float = 0.34) -> bool:
+	if _nav.is_empty():
+		return false
+	var ix := int(floor(x)) + NAV_HALF
+	var iz := int(floor(z)) + NAV_HALF
+	if ix < 0 or iz < 0 or ix >= NAV_SIDE or iz >= NAV_SIDE:
+		return true
+	if _nav[iz * NAV_SIDE + ix] != 0:
+		return true
+	var reach := int(ceil(radius))
+	# How far the body's centre sits from the centre of its own cell, so the
+	# neighbour test is plain arithmetic: this runs a few times per mob per
+	# second, and a `Vector2` per candidate cell is the difference between a
+	# cheap test and an allocation.
+	var span := (radius + 0.71) * (radius + 0.71)
+	var offset_x := float(ix - NAV_HALF) + 0.5 - x
+	var offset_z := float(iz - NAV_HALF) + 0.5 - z
+	for dz in range(-reach, reach + 1):
+		var near_z := offset_z + float(dz)
+		for dx in range(-reach, reach + 1):
+			if dx == 0 and dz == 0:
+				continue
+			var nx := ix + dx
+			var nz := iz + dz
+			if nx < 0 or nz < 0 or nx >= NAV_SIDE or nz >= NAV_SIDE:
+				return true
+			if _nav[nz * NAV_SIDE + nx] == 0:
+				continue
+			# Only a cell the body's disc actually reaches blocks it.
+			var near_x := offset_x + float(dx)
+			if near_x * near_x + near_z * near_z <= span:
+				return true
+	return false
+
+
+## Local-space bounds of the shapes this world builds. `Shape3D` has no public
+## `get_rect`, so each type answers for itself; anything else is skipped rather
+## than guessed at.
+func _shape_bounds(shape: Shape3D) -> AABB:
+	if shape is BoxShape3D:
+		var size := (shape as BoxShape3D).size
+		return AABB(-size * 0.5, size)
+	if shape is CylinderShape3D:
+		var cylinder := shape as CylinderShape3D
+		var half := Vector3(cylinder.radius, cylinder.height * 0.5, cylinder.radius)
+		return AABB(-half, half * 2.0)
+	if shape is SphereShape3D:
+		var radius := (shape as SphereShape3D).radius
+		return AABB(-Vector3.ONE * radius, Vector3.ONE * radius * 2.0)
+	if shape is CapsuleShape3D:
+		var capsule := shape as CapsuleShape3D
+		var reach := Vector3(capsule.radius, capsule.height * 0.5, capsule.radius)
+		return AABB(-reach, reach * 2.0)
+	return AABB()

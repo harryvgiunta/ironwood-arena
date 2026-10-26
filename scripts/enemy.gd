@@ -16,6 +16,10 @@ const NetReplication = preload("res://scripts/net_replication.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
+const MobGround = preload("res://scripts/mob_ground.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
+const MobWire = preload("res://scripts/mob_wire.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
 ## How far each kind can see. Distance alone never starts a fight: the mob has
@@ -34,6 +38,9 @@ var kind := 0
 var pack_index := -1
 var devil_weapon := "claw"
 var player: CharacterBody3D
+## The frontier world, for the analytic ground and navigation field. Null in a
+## bare test scene, where the locomotion helper falls back to a floor ray.
+var terrain: Node3D
 var targets: Array[CharacterBody3D] = []
 var replica := false
 ## Buffered server states: a replica renders a short delay behind the host so
@@ -60,6 +67,11 @@ var _warning: MeshInstance3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
 var _senses := MobSenses.new()
+var _ground: MobGround = MobGround.new()
+var _lod_stride := 1
+var _lod_phase := 0
+var _presenting := true
+var _anim_stride := 1
 var _attacker: Node3D
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
@@ -102,6 +114,8 @@ func _ready() -> void:
 	collision_mask = 1 | 2 | 4
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
+	_ground.radius = 0.34
+	_ground.terrain = terrain if terrain != null else _parent_world()
 	var shape := CapsuleShape3D.new()
 	if kind == 0:
 		shape.radius = 0.40
@@ -235,15 +249,29 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
+	var nearest := _lod_distance()
+	_apply_presentation(nearest)
+	var stride := MobLod.stride_for(nearest)
+	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
+		return
+	if stride != _lod_stride:
+		_lod_stride = stride
+		_lod_phase = MobLod.phase(global_position, stride)
+	delta *= float(stride)
+	Perf.begin("legacy.ai")
 	# Sight and the pursuit memory decide aggression for the wolf and the
 	# cinder devil exactly as they do for the newer mob families.
+	Perf.begin("mob.senses")
 	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
 		_eye_height(), Callable(self, "_is_hostile"))
+	Perf.end()
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
 	if not is_instance_valid(_target) and not pursuit:
+		Perf.end()
 		return
 	if kind == 2:
 		_step_devil(delta, pursuit)
+		Perf.end()
 		return
 	_state_time += delta
 	var focus := _senses.focus() if pursuit else _target.global_position
@@ -290,13 +318,22 @@ func _physics_process(delta: float) -> void:
 				target_direction = to_home.normalized()
 				speed = 2.0
 	if target_direction.length_squared() > 0.1:
+		Perf.begin("mob.steer")
 		target_direction = _steer(target_direction)
+		Perf.end()
 		rotation.y = lerp_angle(rotation.y, atan2(-target_direction.x, -target_direction.z), minf(delta * 8.0, 1.0))
 	velocity.x = move_toward(velocity.x, target_direction.x * speed, delta * 12.0)
 	velocity.z = move_toward(velocity.z, target_direction.z * speed, delta * 12.0)
-	velocity.y = -1.0 if is_on_floor() else velocity.y - 18.0 * delta
-	move_and_slide()
+	velocity.y = -1.0 if _ground.grounded else velocity.y - 18.0 * delta
+	Perf.begin("mob.drive")
+	Perf.begin("mob.slide")
+	_ground.drive(self,delta)
+	Perf.end()
+	Perf.end()
+	Perf.begin("mob.visual")
 	_update_cosmetics(delta)
+	Perf.end()
+	Perf.end()
 
 func _resolve_target() -> CharacterBody3D:
 	var nearest := INF
@@ -341,13 +378,13 @@ func _is_hostile(candidate: Node3D) -> bool:
 	return not MobSenses.in_safe_ring(safe_center, candidate.global_position)
 
 func _update_cosmetics(_delta: float) -> void:
-	var actual_velocity := get_real_velocity()
+	var actual_velocity: Vector3 = _ground.actual
 	_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
 	_wolf.set_combat(state, _state_time)
 
 func _step_devil(delta: float, pursuit: bool) -> void:
 	_state_time += delta
-	_dodge.advance(delta,is_on_floor())
+	_dodge.advance(delta,_ground.grounded)
 	_attack_cooldown = maxf(0.0,_attack_cooldown-delta)
 	_decision_timer -= delta
 	_leap_cooldown = maxf(0.0,_leap_cooldown-delta)
@@ -385,12 +422,12 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 			_slide_time += delta
 			_slide_speed = lerpf(9.4,4.0,clampf(_slide_time/DEVIL_SLIDE_SECONDS,0.0,1.0))
 			_face_intent = _slide_direction
-			if _slide_time >= DEVIL_SLIDE_SECONDS or not is_on_floor():
+			if _slide_time >= DEVIL_SLIDE_SECONDS or not _ground.grounded:
 				_enter_devil_state("CIRCLE")
 		"LEAP":
 			_leap_air_time += delta
 			_face_intent = _leap_direction
-			if is_on_floor() and _leap_air_time > 0.18:
+			if _ground.grounded and _leap_air_time > 0.18:
 				if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
 					_devil_begin_windup(_leap_damage)
 				else:
@@ -444,7 +481,7 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 				_devil_circle(delta,distance,to_target)
 			else:
 				_devil_hunt(delta)
-	var was_grounded := is_on_floor()
+	var was_grounded := _ground.grounded
 	if _dodge.active:
 		var step_velocity: Vector3 = _dodge.velocity()
 		velocity.x = step_velocity.x
@@ -469,16 +506,15 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 		facing = -global_basis.z
 	if facing.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-facing.x,-facing.z),minf(delta*12.0,1.0))
-	var before := global_position
-	move_and_slide()
-	var actual := (global_position-before)/maxf(delta,0.0001)
-	if state == "LEAP" and not was_grounded and is_on_floor() and _leap_air_time > 0.18:
+	_ground.drive(self,delta)
+	var actual: Vector3 = _ground.actual
+	if state == "LEAP" and not was_grounded and _ground.grounded and _leap_air_time > 0.18:
 		if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
 			_devil_begin_windup(_leap_damage)
 		else:
 			_decision_timer = 0.15
 			_enter_devil_state("CIRCLE")
-	_devil.set_motion(actual,is_on_floor())
+	_devil.set_motion(actual,_ground.grounded)
 	_devil.set_action(state,_state_time)
 	_devil.set_step(_dodge.progress if _dodge.active else -1.0,_dodge.direction)
 	_devil.set_slide(_slide_time/DEVIL_SLIDE_SECONDS if state == "SLIDE" else -1.0)
@@ -519,7 +555,7 @@ func _devil_hunt(delta: float) -> void:
 	_face_intent = -global_basis.z
 
 func _devil_choose(distance: float, to_player: Vector3) -> void:
-	if not is_on_floor():
+	if not _ground.grounded:
 		return
 	var roll := _rng.randf()
 	if devil_weapon == "bow":
@@ -556,7 +592,7 @@ func _devil_start_step(to_player: Vector3) -> void:
 	var side := 1.0 if _rng.randf() < 0.5 else -1.0
 	var forward_bias := -0.30 if devil_weapon == "bow" else 0.22
 	var direction := (tangent*side*0.9+to_player.normalized()*forward_bias).normalized()
-	if _dodge.try_step(direction,is_on_floor(),false):
+	if _dodge.try_step(direction,_ground.grounded,false):
 		_enter_devil_state("STEP")
 		_face_intent = to_player.normalized()
 
@@ -753,10 +789,10 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 
 ## Feeds one authoritative pose into the render buffer. The first packet and
 ## any teleport restart the buffer; everything else interpolates.
-func _ingest_pose(state: Dictionary, tick: int) -> void:
-	var point: Vector3 = state.p
-	var yaw := float(state.y)
-	var speed: Vector3 = state.v
+func _ingest_pose(state: PackedFloat32Array, tick: int) -> void:
+	var point := MobWire.position_of(state)
+	var yaw: float = state[MobWire.AT_YAW]
+	var speed := MobWire.velocity_of(state)
 	var at := tick if tick >= 0 else _timeline.newest_tick() + 1
 	var now := Time.get_ticks_msec()/1000.0
 	if not _received_pose:
@@ -810,18 +846,11 @@ func _enter_dead(announce: bool) -> void:
 		death_tween.tween_interval(0.90)
 		CorpseHold.append(death_tween, self, _body)
 
-func snapshot() -> Dictionary:
-	return {
-		"p": global_position,
-		"y": rotation.y,
-		"v": velocity,
-		"g": is_on_floor(),
-		"s": state,
-		"t": _state_time,
-		"h": health,
-		"a": alive,
-		"x": _packed_pose(),
-	}
+## One body's wire record: see `scripts/mob_wire.gd` for the slot layout. The
+## extra vector carries the cinder devil's dodge and slide presentation.
+func snapshot(index := -1) -> PackedFloat32Array:
+	return MobWire.pack(index, global_position, velocity, rotation.y,
+		_state_time, health, _ground.grounded, alive, state, _packed_pose())
 
 func _packed_pose() -> Vector4:
 	if kind != 2:
@@ -837,17 +866,17 @@ func _packed_pose() -> Vector4:
 
 ## Presentation-side mirror of the host's mob: the host owns AI, damage and
 ## arrows, so a replica only replays the snapshot it was handed.
-func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
+func apply_snapshot(state: PackedFloat32Array, tick: int = -1) -> void:
 	var previous_health := health
 	var was_alive := alive
 	_ingest_pose(state,tick)
-	self.state = state.s
-	_state_time = state.t
-	health = state.h
-	alive = state.a
-	velocity = state.v
-	var grounded: bool = state.g
-	var pose: Vector4 = state.x
+	self.state = MobWire.state_of(state)
+	_state_time = state[MobWire.AT_STATE_TIME]
+	health = state[MobWire.AT_HEALTH]
+	alive = MobWire.alive_of(state)
+	velocity = MobWire.velocity_of(state)
+	var grounded := MobWire.grounded_of(state)
+	var pose := MobWire.extra_of(state)
 	_warning.visible = self.state == "WINDUP"
 	if kind == 0:
 		_wolf.set_motion(Vector2(velocity.x,velocity.z).length())
@@ -865,3 +894,45 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	if was_alive and not alive:
 		_enter_dead(false)
 
+
+## The frontier world, when nobody handed one in: mobs are children of the
+## scene that owns it. Null outside a real world.
+func _parent_world() -> Node3D:
+	var parent := get_parent()
+	if parent != null:
+		var candidate = parent.get("world")
+		if candidate is Node3D:
+			return candidate
+	return null
+
+
+## Distance to the closest ranger this mob could hunt: what decides its stride.
+func _lod_distance() -> float:
+	var best := INF
+	if is_instance_valid(player):
+		best = global_position.distance_to(player.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_to(candidate.global_position))
+	return best
+
+
+## Freezes the rig beyond the animation range. Only a real world does this.
+func _apply_presentation(distance: float) -> void:
+	if _body == null or terrain == null:
+		return
+	var live := MobLod.should_animate(distance)
+	if live != _presenting:
+		_presenting = live
+		_body.visible = live
+		if is_instance_valid(_wolf):
+			_wolf.set_frozen(not live)
+		if is_instance_valid(_devil):
+			_devil.set_frozen(not live)
+	var stride := MobLod.anim_stride(distance)
+	if stride != _anim_stride:
+		_anim_stride = stride
+		if is_instance_valid(_wolf):
+			_wolf.set_anim_stride(stride)
+		if is_instance_valid(_devil):
+			_devil.set_anim_stride(stride)

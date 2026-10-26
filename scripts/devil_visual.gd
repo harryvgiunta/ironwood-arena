@@ -5,6 +5,7 @@ extends Node3D
 ## run, leap, slide, side step, claw windup/strike and death flop.
 
 const Geo = preload("res://scripts/geo.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const Bow = preload("res://scripts/bow.gd")
 const Sword = preload("res://scripts/sword.gd")
@@ -16,6 +17,9 @@ const RECOVER_SECONDS := 0.30
 const DEATH_SECONDS := 0.55
 
 var _rig: Node3D
+## Frames per animation step; see `set_anim_stride`.
+var _anim_stride := 1
+var _anim_phase := 0
 var _pelvis: Node3D
 var _torso: Node3D
 var _head: Node3D
@@ -256,6 +260,17 @@ func head_hit_profile() -> Vector2:
 	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
 
 func _process(delta: float) -> void:
+	if _anim_stride > 1:
+		_anim_phase += 1
+		if _anim_phase % _anim_stride != 0:
+			return
+		delta *= float(_anim_stride)
+	Perf.begin("mob.anim")
+	_sample(delta)
+	Perf.end()
+
+
+func _sample(delta: float) -> void:
 	_time += delta
 	if _dead:
 		_death_time += delta
@@ -400,3 +415,13 @@ func _apply_pose(_delta: float) -> void:
 
 func get_height() -> float:
 	return 0.98
+
+
+## Stops the clip writing bone tracks. The last pose stays on the rig, which is
+## what a body beyond the animation range shows: see `MobLod.ANIMATE_RANGE`.
+func set_frozen(frozen: bool) -> void:
+	set_process(not frozen)
+
+
+func set_anim_stride(stride: int) -> void:
+	_anim_stride = maxi(1, stride)
