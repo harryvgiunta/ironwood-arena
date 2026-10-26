@@ -292,7 +292,15 @@ func _begin_step() -> void:
 		str(step.label), main.enemies.size(), spawned.size()])
 
 
+var _last_frame_tick := 0
+
+
 func _physics_process(_delta: float) -> bool:
+	var now := Time.get_ticks_msec()
+	if _last_frame_tick > 0 and now - _last_frame_tick > 40 and _waiting:
+		print("PERF slow frame %d ms open=%s step=%s" % [
+			now - _last_frame_tick, Perf.open_path(), str(_steps[_step].label)])
+	_last_frame_tick = now
 	Perf.tick()
 	if not _waiting:
 		return false

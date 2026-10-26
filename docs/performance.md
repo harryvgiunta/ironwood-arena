@@ -188,6 +188,17 @@ rule that is identical for every family (alive, and outside the town ring). The
 rule lives in `MobSenses` now and the callable is gone. It is worth a few
 percent of the sight pass and one fewer way for the two families to drift apart.
 
+### A burst of bodies costs the engine a frame
+
+Adding a hundred monsters in one frame — which only the benchmark does; the
+delve adds three and the frontier adds its seventy-five at load — produces a
+single **313 ms** frame afterwards. It happens outside every instrumented
+scope: `Perf.open_path()` reports `(none)`, so it is the physics server's first
+step with a hundred new shapes in a busy broadphase, not anything the game
+does. The suite now prints a line for any frame over 40 ms with the scope path
+that was open, because a spike that no scope owns is a different kind of
+finding from one that does.
+
 ### Bodies nobody can see are not ticked
 
 A mob's own tick costs it about six microseconds a frame before it decides

@@ -217,3 +217,16 @@ static func _median_ms() -> float:
 	var sorted := frame_samples.duplicate()
 	sorted.sort()
 	return float(sorted[sorted.size() / 2]) / 1000.0
+
+
+## The scopes currently open, innermost last. Diagnostics only: a frame that
+## blows up needs to name the work that was running when the clock ran out.
+static func open_path() -> String:
+	if _depth <= 0:
+		return "(none)"
+	var parts := PackedStringArray()
+	for index in mini(_depth, _open_name.size()):
+		var slot := _open_name[index]
+		if slot >= 0 and slot < _names.size():
+			parts.append(_names[slot])
+	return "/".join(parts)
