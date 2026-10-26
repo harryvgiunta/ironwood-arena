@@ -75,6 +75,10 @@ var _no_scopes := false
 ## Keep only the `--keep` nearest frontier mobs and free the rest: the
 ## population curve, for deciding how many monsters a frame budget buys.
 var _keep := -1
+## Stops every mob's tick, leaving its node, body and rig: separates "the body
+## exists" from "the body does anything". One `set_physics_process` per mob at
+## boot — a per-frame version costs more than the tick it suppresses.
+var _sleep_all := false
 ## Runs the suite against a tree from before the optimisation work, whose mobs
 ## own their physics step and whose snapshots are dictionaries. The same file
 ## runs on both sides so the two numbers are directly comparable.
@@ -110,6 +114,8 @@ func _initialize() -> void:
 			_legacy = text.substr(9).to_int() != 0
 		elif text.begins_with("--budget="):
 			_budget_ms = maxf(0.0, text.substr(9).to_float())
+		elif text.begins_with("--sleepall="):
+			_sleep_all = text.substr(11).to_int() != 0
 		elif text.begins_with("--keep="):
 			_keep = maxi(0, text.substr(7).to_int())
 		elif text.begins_with("--noscopes="):
@@ -160,6 +166,12 @@ func _boot() -> void:
 	# The world builds once, before the first measured window: its cost is a
 	# load-time number, not a frame-time one.
 	print(Perf.summary("world."))
+	if _sleep_all:
+		# One-time, not per frame: a per-frame `set()` on every mob costs more
+		# than the tick it suppresses.
+		for enemy in main.enemies:
+			if is_instance_valid(enemy):
+				enemy.set_physics_process(false)
 	if _keep >= 0:
 		var ordered := []
 		for enemy in main.enemies:

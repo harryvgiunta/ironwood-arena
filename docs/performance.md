@@ -353,26 +353,25 @@ bodies existing at all. The physics server is not among them: kept bodies cost
 
 ## The budget, itemised
 
-A frontier frame, one ranger and seventy-five monsters, scopes off, medians of
-three, with each figure measured rather than inferred:
+A frontier frame, one ranger and seventy-five monsters, scopes off, each row
+measured by taking one thing away and re-measuring:
 
 | | ms | how it was measured |
 | --- | --- | --- |
 | World, ranger and loop, no mobs | 0.75 | every mob freed |
-| The thirty-four rigs that are in view | 0.23 | every rig freed, bodies left running |
-| The mobs' own script | 0.21 | the scoped runs |
-| Everything else the seventy-five bodies cost | ~0.55 | the remainder |
-| **Total** | **1.77** | |
+| Body, node and rig, all seventy-five | 0.67 | every mob's tick stopped |
+| The tick itself (decisions, sight, motion, presentation) | 0.31 | that number minus the one below it |
+| **Total** | **~1.75** | |
 
-The surprise is the second row. A monster's animated rig — clip, skeleton,
-three skinned meshes — is **6.7 µs a frame**, not the twenty-eight the earlier
-report assumed; freeing every rig on the frontier moves the frame by 0.23 ms.
-The mob cost is diffuse: no single line item is worth chasing, which is why
-each of the experiments below returned five hundredths of a millisecond.
+The rigs inside the first row were priced separately: freeing the presentation
+of the thirty-four bodies that have one moves the frame by 0.23 ms, so a
+monster's animated rig is **6-ish µs a frame**. A body with an *empty* scripted
+tick and a collision shape measures **0.19 µs** — Godot's per-node cost is not
+what any of this is.
 
-Per body across all seventy-five that is 13.6 µs, against 0.41 µs for a bare
-`CharacterBody3D`: the difference is the scripted node, its tick, its
-presentation bookkeeping and its rig.
+So a monster near the ranger costs 17-27 µs, split roughly three ways between
+its rig, its tick and the script inside that tick, and every one of those parts
+is per-node-per-frame work. There is no single line item to delete.
 
 Ninety percent of the original 9.14 ms is **0.91 ms**, which leaves **0.16 ms
 for every monster** — about 2 µs a body. Nothing in this model reaches that by
