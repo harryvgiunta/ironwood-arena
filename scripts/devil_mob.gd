@@ -346,8 +346,9 @@ func _physics_process(delta: float) -> void:
 	_drive(delta)
 	Perf.end()
 	Perf.begin("mob.visual")
-	_visual.set_motion(_ground.actual, _ground.grounded)
-	_visual.set_combat(state, _state_time)
+	if is_instance_valid(_visual):
+		_visual.set_motion(_ground.actual, _ground.grounded)
+		_visual.set_combat(state, _state_time)
 	Perf.end()
 	Perf.end()
 

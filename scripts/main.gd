@@ -700,6 +700,7 @@ func _diag_step(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("main.process")
 	shoulder_camera.update(delta)
 	_update_camera(delta)
 	if _mouse_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen or archer.is_ability():
@@ -710,6 +711,7 @@ func _process(delta: float) -> void:
 	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0), ability.hud_state(1), ability.hud_state(2))
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
+	Perf.end()
 
 func _sample_floor(point: Vector3) -> float:
 	_floor_query.from = point + Vector3(0, 1.15, 0)

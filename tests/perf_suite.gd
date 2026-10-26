@@ -65,6 +65,9 @@ var _shadow_distance := 0.0
 ## Viewport anti-aliasing level, so its cost can be priced. -1 leaves the
 ## project setting alone.
 var _msaa := -1
+## Frees every frontier mob after boot: the world's own frame cost, which is
+## the floor no mob optimisation can go below.
+var _no_mobs := false
 ## Runs the suite against a tree from before the optimisation work, whose mobs
 ## own their physics step and whose snapshots are dictionaries. The same file
 ## runs on both sides so the two numbers are directly comparable.
@@ -100,6 +103,8 @@ func _initialize() -> void:
 			_legacy = text.substr(9).to_int() != 0
 		elif text.begins_with("--budget="):
 			_budget_ms = maxf(0.0, text.substr(9).to_float())
+		elif text.begins_with("--nomobs="):
+			_no_mobs = text.substr(9).to_int() != 0
 		elif text.begins_with("--msaa="):
 			_msaa = text.substr(7).to_int()
 		elif text.begins_with("--shadowdist="):
@@ -143,6 +148,12 @@ func _boot() -> void:
 	# The world builds once, before the first measured window: its cost is a
 	# load-time number, not a frame-time one.
 	print(Perf.summary("world."))
+	if _no_mobs:
+		for enemy in main.enemies:
+			if is_instance_valid(enemy):
+				enemy.free()
+		main.enemies.clear()
+		main._enemies_by_index.clear()
 	_apply_render_cuts()
 	_steps = _plan()
 	if _steps.is_empty():

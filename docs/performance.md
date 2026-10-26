@@ -39,6 +39,8 @@ Attribution knobs, for finding where a cost actually lives:
 | `--novisual=1` | The added mobs' rigs stop drawing and animating. |
 | `--noshape=1` | The added mobs lose their collision shape. |
 | `--noshadow=1`, `--shadowdist=M` | The sun's shadow pass, or its range. |
+| `--msaa=N` | The viewport's anti-aliasing level. |
+| `--nomobs=1` | Every frontier mob is freed: the world's own frame, which is the floor. |
 | `--legacy=1` | Runs against a tree from before this work, for an A/B. |
 
 `--headless` uses a dummy renderer, which is exactly what the CPU half of the
@@ -215,23 +217,41 @@ broadphase keeping a hundred and seventy-five hit bodies hittable.
 
 ## What is left
 
+### Where the budget actually is
+
+Freeing every frontier mob leaves **0.92 ms** — the world, the ranger and the
+loop. The seventy-five mobs cost the other **1.91 ms**, which is **26 µs per
+body per frame**: about 12 µs of script and 14 µs of engine (a physics body, a
+scene node, a render instance and a skeleton, even with the clip frozen at
+distance).
+
+That is the whole picture, and it has a blunt consequence: `main`'s frame was
+9.14 ms, so a ninety percent cut is 0.91 ms — **the world's cost with no mobs
+in it at all**. Hitting it by optimising mobs one at a time is not reachable
+however far the per-mob cost falls; it needs a cheaper *model* of a mob.
+
 In rough order of payoff, for whoever picks this up:
 
-- **Stream distant rigs, don't just freeze them.** A skinned body that exists
-  at all costs about **18 µs a frame** on this machine — measured by adding a
-  hundred inert replicas: 3.55 ms, of which only 0.05 ms is collision. Freezing
-  the animation (already done past 45 m) removes the clip work but not the
-  node, render instance and skeleton. Releasing them entirely and rebuilding on
-  approach is the one large lever left, and it is not free: corpse poses, blood
-  anchors and head zones all reach through the visual.
+- **Stop paying 14 µs per body to exist.** Freeing a distant mob's rig instead
+  of just freezing it is the only lever of that size left. It is not a small
+  change: corpse poses, blood anchors, head zones and the animation sampler all
+  reach through the visual, and several suites inspect frontier mob rigs at
+  their authored spawn distances.
+- **A cheaper mob model altogether** — instanced or aggregate bodies for the
+  rank and file, with full nodes only for the ones in reach. This is what a
+  ninety percent cut actually looks like.
 - **One brain for a pack.** A hundred mobs in one room do a hundred sight rays,
   a hundred spacing walks and a hundred state machines to produce what is, in
   practice, one fight.
-- **A faster shadow cascade** rather than a shorter one: the pass is half the
-  draw calls at 60 m, and a cheaper split count or a cached static depth would
-  keep the look.
 
 Measured and dismissed, so nobody repeats them:
+
+- **A tighter or slower animation range** — 45 m to 24 m, and half-rate
+  everywhere instead of only past 12 m, both moved the frame by less than the
+  run-to-run noise. The animation that remains is the ranger's own rig and the
+  handful of bodies actually near him, and that is content, not waste.
+- **A cheaper HUD frame** — `main._process` costs 0.17 ms with the whole status
+  block, the reticle, the map and the interaction probe in it.
 
 - **Replacing the mob bodies with analytic hitboxes** — the shapes cost 0.05 ms
   across 175 bodies once locomotion stopped querying the physics server.

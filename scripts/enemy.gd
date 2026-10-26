@@ -378,6 +378,8 @@ func _is_hostile(candidate: Node3D) -> bool:
 	return not MobSenses.in_safe_ring(safe_center, candidate.global_position)
 
 func _update_cosmetics(_delta: float) -> void:
+	if not is_instance_valid(_wolf):
+		return
 	var actual_velocity: Vector3 = _ground.actual
 	_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
 	_wolf.set_combat(state, _state_time)
@@ -514,10 +516,11 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 		else:
 			_decision_timer = 0.15
 			_enter_devil_state("CIRCLE")
-	_devil.set_motion(actual,_ground.grounded)
-	_devil.set_action(state,_state_time)
-	_devil.set_step(_dodge.progress if _dodge.active else -1.0,_dodge.direction)
-	_devil.set_slide(_slide_time/DEVIL_SLIDE_SECONDS if state == "SLIDE" else -1.0)
+	if is_instance_valid(_devil):
+		_devil.set_motion(actual,_ground.grounded)
+		_devil.set_action(state,_state_time)
+		_devil.set_step(_dodge.progress if _dodge.active else -1.0,_dodge.direction)
+		_devil.set_slide(_slide_time/DEVIL_SLIDE_SECONDS if state == "SLIDE" else -1.0)
 
 func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
 	_orbit_angle += _orbit_dir*delta*(1.65+0.40*sin(_orbit_phase+_state_time*0.8))
