@@ -18,6 +18,7 @@ const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const LagCompensation = preload("res://scripts/lag_compensation.gd")
+const PerfOverlay = preload("res://scripts/perf_overlay.gd")
 ## A backstab picks its body from the layer the fighters spar on.
 const BACKSTAB_MASK := 4
 const BACKSTAB_RANGE := 8.0
@@ -36,6 +37,8 @@ var world
 var hud
 var audio
 var camera: Camera3D
+## F8 frame diagnostics (see `perf_overlay.gd`).
+var _perf_overlay
 var _peer_slots: Dictionary = {}
 # Per actor: newest snapshot sent by the host or applied by this client.
 var _snapshot_ticks := PackedInt32Array([-1,-1,-1,-1])
@@ -96,6 +99,8 @@ func _ready() -> void:
 	add_child(layer)
 	hud = Hud.new()
 	layer.add_child(hud)
+	_perf_overlay = PerfOverlay.new()
+	layer.add_child(_perf_overlay)
 	hud.host_requested.connect(host_game)
 	hud.join_requested.connect(join_game)
 	hud.leave_requested.connect(leave_game)
@@ -1216,6 +1221,11 @@ func _send_step(side: int) -> void:
 	send_action("step",right*signf(float(side)))
 
 func _unhandled_input(event: InputEvent) -> void:
+	# F8 diagnostics are not match input: they work in the lobby too.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
+		if is_instance_valid(_perf_overlay):
+			_perf_overlay.toggle()
+		return
 	if local_slot < 0:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:

@@ -37,6 +37,8 @@ const NetLimits = preload("res://scripts/net_limits.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const LagCompensation = preload("res://scripts/lag_compensation.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+const PerfOverlay = preload("res://scripts/perf_overlay.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 const MobWire = preload("res://scripts/mob_wire.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
@@ -68,6 +70,10 @@ var hud
 var world_ui
 var audio
 var _player_state
+## F8 diagnostics: frame, render, memory and per-scope timings. It owns the
+## `Perf` switch while it is open and restores it on close.
+var _perf_overlay
+var _perf_context_elapsed := 0.0
 var _delve_host := false
 var _delve_port := 7777
 var _delve_name := ""
@@ -273,6 +279,8 @@ func _ready() -> void:
 	add_child(layer)
 	hud = Hud.new()
 	layer.add_child(hud)
+	_perf_overlay = PerfOverlay.new()
+	layer.add_child(_perf_overlay)
 	hud.bow_selected.connect(equip_bow)
 	hud.armor_selected.connect(equip_armor_slot)
 	hud.sword_selected.connect(equip_sword)
@@ -561,6 +569,12 @@ func _physics_process(delta: float) -> void:
 		_link.release(Time.get_ticks_msec()/1000.0)
 	if _net_diag:
 		_diag_step(delta)
+	# Before the client branch: replicas on a client need the same far-body
+	# skip the host's own bodies get, or every replica ticks presentation at
+	# seventy metres forever.
+	Perf.begin("mob.cull")
+	_step_mob_distance_cull()
+	Perf.end()
 	if network_role == "client":
 		_client_step(delta)
 		Perf.end()
@@ -698,7 +712,6 @@ func _physics_process(delta: float) -> void:
 	if _entering_scene:
 		Perf.end()
 		return
-	_step_mob_culling()
 	if network_role == "host":
 		_host_network_step(delta)
 	Perf.end()
@@ -757,6 +770,12 @@ func _process(delta: float) -> void:
 	Perf.begin("cam.follow")
 	_update_camera(delta)
 	Perf.end()
+	# After the camera has moved and before this frame is drawn: the visibility
+	# decision must describe the view the player is looking at right now.
+	Perf.begin("mob.view")
+	_step_mob_visibility()
+	Perf.end()
+	_update_perf_context(delta)
 	if _mouse_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen or archer.is_ability():
 		update_crosshair_aim()
 	_update_interaction()
@@ -978,6 +997,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				toggle_view()
 			hud.close_panels()
 			_set_cursor_free(true)
+			return
+		# Diagnostics are not gameplay input: they answer before the kit does.
+		if event.keycode == KEY_F8:
+			if is_instance_valid(_perf_overlay):
+				_perf_overlay.toggle()
 			return
 		if _ui_open():
 			return
@@ -3050,28 +3074,91 @@ func _warm_mob_blood() -> void:
 	Perf.end()
 
 
-## Tells every body whether anything can see it. A mob far from every ranger has
-## nothing to decide, animate or present; its own tick would spend six
-## microseconds working that out, so the scene answers once for all of them and
-## the body reads one field. Corpses keep ticking so they still fall and hold.
-func _step_mob_culling() -> void:
-	# Four times a second is plenty: the cull threshold sits twelve metres
-	# beyond the rig-release range, so a ranger closing at a sprint has more
-	# than a second of margin before a skipped body would need presenting.
+## Feeds the F8 overlay what this scene knows that the engine does not: how the
+## mob population is split between live, skipped, rigged and actually drawn
+## bodies. Cheap enough to walk every slot four times a second, and only while
+## the overlay is open.
+func _update_perf_context(delta: float) -> void:
+	if not is_instance_valid(_perf_overlay) or not _perf_overlay.is_open():
+		return
+	_perf_context_elapsed += delta
+	if _perf_context_elapsed < 0.25:
+		return
+	_perf_context_elapsed = 0.0
+	var live := 0
+	var asleep := 0
+	var rigs := 0
+	var drawn := 0
+	for enemy in _enemies_by_index:
+		if not is_instance_valid(enemy):
+			continue
+		live += 1
+		if bool(enemy.get("skip_tick")):
+			asleep += 1
+		var body = enemy.get("_body")
+		if is_instance_valid(body):
+			rigs += 1
+			if body.visible:
+				drawn += 1
+	_perf_overlay.set_context(PackedStringArray([
+		"mobs     %d live    %d asleep    %d rigs    %d drawn" % [live, asleep, rigs, drawn],
+	]))
+
+
+## Tells every body whether any ranger is close enough for it to matter. A mob
+## far from every ranger has nothing to decide, animate or present; its own tick
+## would spend six microseconds working that out, so the scene answers once for
+## all of them and the body reads one field. Corpses keep ticking so they still
+## fall and hold.
+##
+## This is the *distance* half of the cull and runs on the physics clock, four
+## times a second: the threshold sits twelve metres beyond the rig-release
+## range, so a ranger closing at a sprint has more than a second of margin
+## before a skipped body would need presenting. The camera half is
+## `_step_mob_visibility`, which must run on the frame being drawn.
+func _step_mob_distance_cull() -> void:
 	if Engine.get_physics_frames() % 15 != 0:
 		return
-	# Offscreen animation culling is only safe when this peer's camera is the
-	# only viewer: offline, or a client (whose camera is the one drawing the
-	# replicas). A host with remote peers cannot know what they can see.
-	var cull_offscreen := network_role == "offline" or network_role == "client"
 	for enemy in _enemies_by_index:
 		if not is_instance_valid(enemy):
 			continue
 		enemy.skip_tick = not _enemy_relevant(enemy) and bool(enemy.get("alive")) != false
-		if cull_offscreen and is_instance_valid(camera):
-			# Two samples, not one: a body straddling the screen edge can have
-			# its feet outside the frustum and its torso inside, and freezing it
-			# there would show as a statue half on screen.
-			var at: Vector3 = enemy.global_position
-			enemy.offscreen = not (camera.is_position_in_frustum(at + Vector3(0.0, 0.35, 0.0))
-				or camera.is_position_in_frustum(at + Vector3(0.0, 1.7, 0.0)))
+
+
+## Tells every body whether this peer's camera can see it -- once per rendered
+## frame, from the camera that is about to draw it.
+##
+## Two rules keep the cull invisible:
+##  * it only applies where this peer's camera is the only viewer: offline, or a
+##    client, whose camera draws the replicas. A host with remote peers cannot
+##    know what they can see;
+##  * the test is a conservative bounding sphere (`MobLod.VIEW_RADIUS`), so a
+##    body straddling the screen edge keeps drawing and animating.
+##
+## It used to run on the physics timer, four times a second, with two point
+## samples. Turning onto a body could leave it hidden in plain sight for a
+## quarter of a second -- the mob that "pops out of nowhere" -- and a body whose
+## torso was on screen could be hidden because both samples missed it.
+func _step_mob_visibility() -> void:
+	# Offscreen culling is only safe when this peer's camera is the only viewer.
+	var cull_offscreen := (network_role == "offline" or network_role == "client") \
+		and is_instance_valid(camera) and camera.is_inside_tree()
+	var planes: Array[Plane] = []
+	if cull_offscreen:
+		planes = camera.get_frustum()
+	for enemy in _enemies_by_index:
+		if not is_instance_valid(enemy):
+			continue
+		# Only a body that owns a rig has anything to draw or freeze. A released
+		# body keeps its stale flag until it rebuilds, and this pass re-reads it
+		# after that build and before the frame is drawn.
+		if not is_instance_valid(enemy.get("_body")):
+			continue
+		if planes.is_empty():
+			# No camera to answer for: never leave a stale freeze behind after a
+			# role change or a scene hand-off.
+			if enemy.offscreen:
+				enemy.set_offscreen(false)
+			continue
+		var centre: Vector3 = enemy.global_position + Vector3.UP * MobLod.VIEW_CENTRE_HEIGHT
+		enemy.set_offscreen(not MobLod.in_view(planes, centre))

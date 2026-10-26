@@ -404,9 +404,11 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 		# A rig exists only while the body is close enough to be seen: past
 		# `MobLod.RELEASE_RANGE` the presentation subtree is freed outright,
 		# because a skinned body costs about fourteen microseconds a frame just
-		# by existing. It is rebuilt when the ranger comes back.
+		# by existing. A body that walked out from close keeps its rig all the
+		# way to the release range; one that comes back in has it rebuilt inside
+		# `MobLod.REBUILD_RANGE`.
 		var range: float = devil.global_position.distance_to(frontier.player.global_position)
-		if range <= MobLod.ANIMATE_RANGE:
+		if range <= MobLod.REBUILD_RANGE:
 			check(is_instance_valid(devil.get("_visual")),
 				"a frontier devil in view has an imported visual")
 			shown += 1

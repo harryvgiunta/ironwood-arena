@@ -424,7 +424,7 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 		kinds[int(mob.get("kind"))] = true
 		# The rig exists only inside the release range; see `MobLod`.
 		var range: float = mob.global_position.distance_to(frontier.player.global_position)
-		if range <= MobLod.ANIMATE_RANGE:
+		if range <= MobLod.REBUILD_RANGE:
 			check(is_instance_valid(mob.get("_visual")),
 				"a frontier forest mob in view has an imported visual")
 			shown += 1

@@ -786,6 +786,15 @@ func _lod_distance() -> float:
 	return best
 
 
+## Set by the scene when the body is outside the viewer's frustum. Ranger
+## clones are exempt from the camera cull -- the bow draw they time their
+## release against lives in the rig, so a clone keeps animating even when the
+## camera has left it -- but the scene writes the same field for every body, so
+## the hook stays and only records it.
+func set_offscreen(value: bool) -> void:
+	offscreen = value
+
+
 ## A distant clone stops drawing and its rig stops sampling animation; the
 ## last pose stays. Only a real world culls this way.
 func _apply_presentation(distance: float) -> void:
@@ -793,7 +802,7 @@ func _apply_presentation(distance: float) -> void:
 		return
 	# A clone's rig is gameplay: the bow draw it times its release against lives
 	# there, so a clone keeps animating even when the camera has left it.
-	var live := MobLod.should_animate(distance)
+	var live := MobLod.should_present(distance)
 	if live == _presenting:
 		return
 	_presenting = live

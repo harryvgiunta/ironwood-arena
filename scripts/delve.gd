@@ -30,6 +30,7 @@ const SpellProjectile = preload("res://scripts/spell_projectile.gd")
 const BackstabAbility = preload("res://scripts/backstab_ability.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const PerfOverlay = preload("res://scripts/perf_overlay.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const Seat = preload("res://scripts/seat_loadout.gd")
@@ -93,6 +94,8 @@ var world
 var hud
 var audio
 var camera: Camera3D
+## F8 frame diagnostics (see `perf_overlay.gd`).
+var _perf_overlay
 var actors: Array = []
 var devils: Array = []
 var chest
@@ -208,6 +211,8 @@ func _ready() -> void:
 	add_child(layer)
 	hud = Hud.new()
 	layer.add_child(hud)
+	_perf_overlay = PerfOverlay.new()
+	layer.add_child(_perf_overlay)
 	hud.hub_requested.connect(_hub)
 	hud.surface_requested.connect(_on_surface_requested)
 	_player_state = get_node_or_null("/root/PlayerState")
@@ -1811,6 +1816,11 @@ func _send_step(side: int) -> void:
 	send_action("step",right*signf(float(side)))
 
 func _unhandled_input(event: InputEvent) -> void:
+	# F8 diagnostics are not delve input: they work while joining too.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
+		if is_instance_valid(_perf_overlay):
+			_perf_overlay.toggle()
+		return
 	if local_slot < 0:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:

@@ -106,11 +106,36 @@ Reported scopes:
 | `mob.ai`, `legacy.ai`, `clone.ai` | One tick of each mob family's brain. |
 | `mob.senses`, `mob.state`, `mob.separate`, `mob.drive`, `mob.slide`, `mob.steer`, `mob.visual` | The parts of that tick: sight, the state machine, spacing, steering, the ground step and presentation. |
 | `mob.anim` | A mob's presentation sampler. |
+| `mob.cull` | The scene's four-hertz distance pass (`skip_tick`). |
+| `mob.view` | The per-frame camera pass that hides and freezes offscreen rigs. |
 | `net.host`, `net.build`, `net.pack`, `net.seats`, `net.lag` | The host's replication work. |
 | `spawn.mob`, `spawn.visual`, `spawn.instantiate`, `spawn.materials` | The cost of adding one monster. |
 | `world.build` | The world's construction. |
 
 A scope's cost when the profiler is off is a single static-var read.
+
+## F8 in the game
+
+`scripts/perf_overlay.gd` is the same instrument without a harness: press
+**F8** in the frontier, the arena or the delve and the frame is drawn as text
+over the scene. Press it again to close. The top block is the frame itself —
+measured frame time and fps over a rolling window, the worst frame and the 1%
+low, the engine's process and physics clocks, draw calls, primitives, objects,
+node/resource/orphan counts and static/video memory. The frontier adds its
+population split: live bodies, bodies skipped by the distance pass, rigs that
+exist, and rigs actually drawn.
+
+Below that is the profiler table from `Perf`: the heaviest scopes of the last
+quarter second with milliseconds per frame and share of the frame, so "the
+frame is slow" becomes "this step is slow". The scopes are compiled into the
+hot entry points and cost one static-var read when off; opening the overlay is
+the only time normal play pays for them, and closing restores whatever switch
+the harness had set. It is a diagnostic, not a gameplay input: it answers F8
+before the inventory, map or any match key, and it works while joining.
+
+The overlay is not a substitute for the suite: it reports what this machine is
+doing right now, including a vsynced display, while the suite measures costs
+that are comparable across runs.
 
 ## What it cost before
 
@@ -192,18 +217,27 @@ because pairing is decided by the *querying* body's mask and the mob keeps its
 layer. Dense scenes drop about three percent; the frontier is unchanged
 because its bodies are spread out.
 
-### Rig animation is culled by the camera
+### Rig animation is culled by the camera, on the frame that draws it
 
-Being in range and being *seen* are different questions. A monster within 45 m
-owns its rig, but if the viewer's frustum does not contain it the clip stops
-advancing and the body stops drawing — a freeze, not a release, so turning the
-camera back does not rebuild a mesh. Nineteen of a hundred mobs in a ring are
-in view at any moment, and that is worth about six percent of the dense case.
+Being in range and being *seen* are different questions. A monster that owns
+its rig but is outside the viewer's frustum stops advancing its clip and stops
+drawing — a freeze, not a release, so turning the camera back does not rebuild
+a mesh. Nineteen of a hundred mobs in a ring are in view at any moment, and
+that is worth about six percent of the dense case.
 
-The test samples the body at ankle and shoulder height, not once at its
-centre: a monster straddling the screen edge can have its feet outside the
-frustum and its torso inside, and freezing it there would show as a statue half
-on screen.
+The pass runs in `main._process`, after the camera has moved and before the
+frame is drawn, so its answer describes the view the player is about to see. It
+used to run on the physics timer four times a second and sample the body at
+ankle and shoulder height. Two faults came out of that: the camera could turn
+onto a monster that stayed hidden for up to **240 ms** (the "mob that pops out
+of nowhere"), and a body whose torso straddled the screen edge could be hidden
+because both samples missed it. `MobLod.in_view` now answers once per body
+against a **2 m bounding sphere** — the tallest devil plus a swung weapon's
+reach — so a body is only called offscreen when every part of it is. The cost
+is about **0.07 ms per rendered frame** across the frontier's 34 rigs (about
+**0.18 ms** in the 175-body crowd benchmark, where almost every body is
+rigged), and the visible toggle is instant: the frame the camera turns onto a
+body is the frame it draws.
 
 It only applies where this peer's camera is the only viewer — offline, or on a
 client, whose camera is the one drawing the replicas. A host with remote peers
@@ -256,17 +290,26 @@ range — and each body reads one boolean at the top of its tick.
 In the shipped frontier that skips **38 of 75 bodies entirely**. A culled body
 keeps its node, its collision shape and its snapshot slot; it just stops
 thinking, moving and presenting until a ranger is within seventy metres again.
-Corpses are never culled, so they still fall and hold.
+Corpses are never culled, so they still fall and hold. Clients run the same
+distance pass over their replicas; before that only the host did, so every
+replica beyond seventy metres kept ticking presentation on the client that was
+drawing it.
 
 ### The rigs are culled and slowed with distance
 
-Past 45 m a mob's body stops drawing and its clip stops writing bone tracks.
-Inside that range the sampler runs at **thirty hertz** rather than sixty: the
-frames between skip it, so the clip advances the same time over a longer gap
-and the skeleton is only touched when it actually moves. Thirty-hertz character
-animation is the standard trade and it measures at 5% of a frontier frame — the
-faster near tier that used to exist was deleted once that was measurable rather
-than assumed to be below noise.
+A mob's rig exists until **58 m**. Inside it the sampler runs at **thirty
+hertz** rather than sixty: the frames between skip it, so the clip advances the
+same time over a longer gap and the skeleton is only touched when it actually
+moves. Thirty-hertz character animation is the standard trade and it measures
+at 5% of a frontier frame — the faster near tier that used to exist was deleted
+once that was measurable rather than assumed to be below noise.
+
+**45 m is the rebuild threshold, not a draw line.** A body that walked out from
+the player keeps drawing and animating all the way to 58 m; a released rig is
+rebuilt when its body comes back inside 45 m. The 13 m gap is hysteresis
+against a body pacing the boundary. Hiding at 45 m instead put a visible pop
+into the mid distance in both directions, for a handful of frames in a ring
+that is already animating.
 
 ### The world's bodies are indexed once per frame
 
@@ -295,9 +338,11 @@ inside **45 m**. The gap between those two numbers is hysteresis: a body pacing
 the boundary must not build and free a rig every second.
 
 The rebuilt rig starts at the top of its idle clip on the frame the ranger
-comes back, which is the one visible cost of the trade and it happens at the
-edge of the treeline. Replicas on a client run the same culling — they own the
-only copy of a mob a client draws, so they get the same saving.
+comes back, which is the one visible cost of the trade and it happens 45 m out,
+at the edge of the treeline. A body that is still walking away has kept its rig
+and its clip the whole time, so the only transition at the far end is the
+release at 58 m. Replicas on a client run the same culling — they own the only
+copy of a mob a client draws, so they get the same saving.
 
 `mob_motion_regression` pins the motion/time split directly: every frame a walking body moves, and evenly. `devil_mobs_regression` and `forest_mobs_regression` pin both halves of the rig contract: a body in
 view has its imported visual, a body past the release range has none, and a

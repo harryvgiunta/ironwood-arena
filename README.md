@@ -243,6 +243,7 @@ Strikes are judged against the world the client saw. The host records one second
 | G | Interact with a keeper, the stash, the campfire or a waystone; open a wave cache, descend, or ascend |
 | I | Open or close the in-world inventory (15 backpack slots plus the ground strip); while open it owns the cursor and blocks movement, attacks and interactions |
 | P | Open or close the equipment paperdoll (ten equipped slots); while open it owns the cursor and blocks movement, attacks and interactions |
+| F8 | Toggle the frame-performance overlay: measured frame time and fps, worst frame and 1% low, the engine's process/physics clocks, draw calls, primitives, objects, node/resource/memory counts, the frontier's live/skipped/rigged/drawn mob split, and the live `Perf` scope table. It works in the frontier, the arena and the delve, including while joining, and turns the profiler on only while it is open |
 | Escape | Close the inventory, paperdoll, keeper or stash panel first; otherwise free the cursor for equipment clicks, cancel a held attack, or toggle the captured cursor in the arena and delve |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
 | Mouse wheel | Select the melee variant when armed; hold Ctrl to zoom |
@@ -416,11 +417,13 @@ The title menu and arena lobby remember the **last player name, host address, UD
 
 A monster no longer pays for a physics step. The frontier's terrain is an analytic height field and its props are marked in a square-metre navigation grid, so a mob's next step is a few array reads instead of a **~90 µs** `move_and_slide` — the single largest cost a busy frontier frame used to carry. Mobs keep their collision shape on the hit layer, so blades, arrows and spells still find them.
 
-Mobs also think on a **stride**: every second physics tick inside 22 m, every fourth out to 55 m, every twelfth beyond, with the decimated tick scaling `delta` so speeds, cooldowns and the sight memory stay in real time. Their rigs stop drawing and stop writing bone tracks past **45 m**, and animate every other frame from **12 m**. Spacing reads a shared square-metre bucket grid instead of scanning every wilderness mob.
+Mobs also think on a **stride**: every second physics tick inside 22 m, every fourth out to 55 m, every twelfth beyond, with the decimated tick scaling `delta` so speeds, cooldowns and the sight memory stay in real time. A mob's rig is freed past **58 m** and rebuilt when its body comes back inside **45 m**; between those two the body keeps drawing and animating, and a visible rig samples at thirty hertz, so a body walking away never vanishes from the middle distance. The camera pass that hides offscreen rigs runs on the rendered frame — after the camera has moved — and tests a **2 m bounding sphere**, so turning onto a monster shows it on that frame instead of up to a quarter second later. Spacing reads a shared square-metre bucket grid instead of scanning every wilderness mob.
+
+Press **F8** in any scene for the live frame diagnostic: fps and frame time, the worst frame and 1% low of the recent window, the engine's process and physics clocks, draw calls and primitives, scene and memory counts, the frontier's live/skipped/rigged/drawn mob split, and the profiler's heaviest scopes with their share of the frame.
 
 Mob snapshots travel as **fifteen floats** (68 bytes) instead of a nine-key dictionary (244 bytes): 133 mobs in view ship in ~11 datagrams a send instead of 35, which is a third of the upload and the difference between a host on a home connection keeping up and dropping the snapshots that own the smoothness. The sun's shadow range is **60 m**, which still covers every weapon's useful range and the whole town square.
 
-`tests/perf_suite.gd` measures all of it — the shipped frontier, thirty monsters spawned at once, a hundred fighting around an invulnerable ranger, and the host's replication path — and `docs/performance.md` records the numbers, the method and what is left.
+`tests/perf_suite.gd` measures all of it — the shipped frontier, thirty monsters spawned at once, a hundred fighting around an invulnerable ranger, and the host's replication path — and `docs/performance.md` records the numbers, the method and what is left. `tests/mob_cull_regression.gd` guards the camera cull on the real frontier: it turns the camera onto and away from live bodies and checks the frame the rig appears or hides on, that the 2 m sphere keeps a body just past the frustum edge in view, and that a host never culls by its own camera.
 
 ## Blood and wounds
 

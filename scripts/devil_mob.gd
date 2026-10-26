@@ -168,12 +168,16 @@ var _push_phase := 0
 var skip_tick := false
 ## Set by the scene when the body is outside the viewer's frustum. An offscreen
 ## monster still simulates; it just stops spending frames on its rig, and the
-## pose it resumes with reads correctly because nobody watched the gap.
+## pose it resumes with reads correctly because nobody watched the gap. The
+## scene rewrites this from the frame that is about to be drawn, so a body is
+## hidden on the frame it leaves the view and shown on the frame it returns.
 var offscreen := false
 var _lod_stride := 1
 var _lod_phase := 0
-## Whether the rig is currently being animated and drawn.
+## Whether the body owns a rig at all (inside `MobLod.RELEASE_RANGE`).
 var _presenting := true
+## Whether that rig is currently drawn and its clip advancing.
+var _animating := true
 var _anim_stride := 1
 var _attacker: Node3D
 
@@ -795,8 +799,34 @@ func _lod_distance() -> float:
 	return best
 
 
-## Freezes the rig beyond the animation range. Only a real world does this: a
-## mob built in a bare test scene keeps animating so its clip can be read.
+## Applies the one presentation decision: a body that is drawn animates, and a
+## body that is hidden does neither. Called when the distance tier changes and
+## by `set_offscreen` from the camera pass, so visibility always matches the
+## frame being drawn.
+func _sync_presentation() -> void:
+	if _body == null:
+		return
+	var drawn := _presenting and not offscreen
+	if _body.visible != drawn:
+		_body.visible = drawn
+	if _animating != drawn:
+		_animating = drawn
+		if is_instance_valid(_visual):
+			_visual.set_frozen(not drawn)
+
+
+## Called by the scene that owns the camera, once per rendered frame, after the
+## camera has moved. `main.offscreen` used to be sampled four times a second by
+## the physics tick, which left a body that the camera had just turned onto
+## invisible for up to a quarter second -- the mobs that "popped out of
+## nowhere".
+func set_offscreen(value: bool) -> void:
+	if value == offscreen:
+		return
+	offscreen = value
+	_sync_presentation()
+
+
 ## Builds the presentation subtree: the container and the species sampler.
 ## Used both when the body is first added and when a rig that was released at
 ## range is rebuilt on approach.
@@ -829,31 +859,25 @@ func _apply_presentation(distance: float) -> void:
 	# exists for, so only a missing world bails out here.
 	if terrain == null:
 		return
-	# Two separate questions. A body in range owns a rig; a body the viewer can
-	# actually see spends frames animating it. Being offscreen is a *freeze*,
-	# not a release -- freeing here would rebuild the rig every time the camera
-	# turned.
-	var in_range := MobLod.should_animate(distance)
-	var animate := in_range and not offscreen
-	if in_range != _presenting:
-		_presenting = in_range
-		if _body == null and in_range:
-			# Coming back into range: rebuild the rig and let the next tick's
-			# `set_motion`/`set_combat` put it in the right clip.
-			_build_rig()
-		elif _body != null:
-			_body.visible = animate
-			if is_instance_valid(_visual):
-				_visual.set_frozen(not animate)
-	if distance > MobLod.RELEASE_RANGE and _body != null:
-		_release_rig()
+	if distance > MobLod.RELEASE_RANGE:
+		# Freed, not hidden: the node, render instance and skeleton cost a body
+		# about fourteen microseconds a frame just by existing.
+		if _body != null:
+			_release_rig()
+			_animating = false
+		_presenting = false
 		return
-	if _body != null and _body.visible != animate:
-		_body.visible = animate
-		if is_instance_valid(_visual):
-			_visual.set_frozen(not animate)
 	if _body == null:
-		return
+		# Rebuild only inside the rebuild range: the gap to the release range
+		# is the hysteresis that stops a body pacing the boundary from freeing
+		# and rebuilding a rig every second.
+		if distance > MobLod.REBUILD_RANGE:
+			_presenting = false
+			return
+		_build_rig()
+		_anim_stride = 0
+	_presenting = true
+	_sync_presentation()
 	var stride := MobLod.ANIMATE_STRIDE
 	if stride != _anim_stride:
 		_anim_stride = stride

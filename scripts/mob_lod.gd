@@ -16,25 +16,31 @@ extends RefCounted
 ## Every tier is staggered by a per-mob phase, so a hundred mobs do not all
 ## think on the same frame and turn a smooth frame budget into a spike.
 
-## Beyond this the rig stops animating altogether: the clip stops writing bone
-## tracks and the body stops drawing. A walk cycle is not readable at that
-## range through the trees, and the animation of every distant devil is roughly
-## a third of a frontier frame.
-const ANIMATE_RANGE := 45.0
-## Frames per animation step for a body inside that range. Thirty hertz is the
+## The approach threshold at which a rig that was released at `RELEASE_RANGE`
+## is rebuilt. It is deliberately not where animation stops: a body that walked
+## out from the player keeps its rig, drawing and animating, all the way to
+## `RELEASE_RANGE`. Hiding it at this line put a visible pop into the mid
+## distance in both directions. The gap between the two numbers is hysteresis:
+## a body pacing the boundary must not build and free a rig every second.
+const REBUILD_RANGE := 45.0
+## Frames per animation step for a presented body. Thirty hertz is the
 ## standard trade for character animation: the sampler is skipped on the frames
 ## between, so the clip advances the same time over a longer gap and the
 ## skeleton is only touched when it actually moves. Measured at 5% of a
 ## frontier frame over sixty-hertz rigs.
 const ANIMATE_STRIDE := 2
-## Inside this the rig animates every frame; between here and `ANIMATE_RANGE`
-## it animates every other frame, which halves the bone work of every body that
-## is not right in front of the player and reads identically at that distance.
-## Past this a body's presentation subtree is released rather than frozen, and
-## rebuilt when it comes back inside `ANIMATE_RANGE`. The gap between the two
-## is hysteresis: a body pacing the boundary must not build and free a rig
-## every second.
+## Past this a body's presentation subtree is released outright -- four
+## hundredths of a millisecond each, but a body that far away is not read -- and
+## rebuilt when it comes back inside `REBUILD_RANGE`.
 const RELEASE_RANGE := 58.0
+## Radius of the sphere that decides whether a body is on screen. It covers the
+## tallest devil plus the reach of a swung weapon, so a body straddling the
+## screen edge is never called offscreen while a sliver of it still draws. The
+## test that came before sampled two points on the body and could hide a body
+## whose torso was in view.
+const VIEW_RADIUS := 2.0
+## Height above a body's root at which that sphere is centred.
+const VIEW_CENTRE_HEIGHT := 1.0
 ## Metres to the nearest ranger at which each stride takes over.
 const NEAR := 22.0
 const MID := 55.0
@@ -69,9 +75,23 @@ static func phase(at: Vector3, span: int) -> int:
 	return int(absf(at.x * 7.0 + at.z * 13.0)) % span
 
 
-## True when this mob should think on this physics frame.
-static func should_animate(distance: float) -> bool:
-	return distance <= ANIMATE_RANGE
+## True while a body is close enough to own, draw and animate a rig at all.
+static func should_present(distance: float) -> bool:
+	return distance <= RELEASE_RANGE
+
+
+## True when a body's bounding sphere still touches the viewer's frustum.
+##
+## `planes` is one `Camera3D.get_frustum()`, computed once for the whole scene
+## and shared by every body. Its normals point *out* of the view volume, so a
+## point is outside a plane when its signed distance is positive; adding the
+## body's radius makes the test conservative -- a body is only offscreen when
+## the whole sphere is, which is the only state in which hiding it is free.
+static func in_view(planes: Array[Plane], centre: Vector3, radius: float = VIEW_RADIUS) -> bool:
+	for plane in planes:
+		if plane.distance_to(centre) > radius:
+			return false
+	return true
 
 
 static func due(frame: int, phase_offset: int, stride: int) -> bool:

@@ -147,7 +147,7 @@ func _ready() -> void:
 	var camp_button := _button(self, "R   RETURN TO TOWN", Vector2(-216, -75), Vector2(192, 35))
 	camp_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	camp_button.pressed.connect(func(): camp_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1 / 2 / 3  Skills   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1 / 2 / 3  Skills   G  Interact   I  Inventory   P  Equipment   F8  Performance", Vector2(-600, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)

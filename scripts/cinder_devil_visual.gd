@@ -437,7 +437,7 @@ func _advance_death(delta: float) -> void:
 
 
 ## Stops the clip writing bone tracks. The last pose stays on the rig, which is
-## what a body beyond the animation range shows: see `MobLod.ANIMATE_RANGE`.
+## what a body outside the camera shows: see `MobLod.in_view`.
 func set_frozen(frozen: bool) -> void:
 	set_process(not frozen)
 
