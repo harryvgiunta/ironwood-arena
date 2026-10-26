@@ -394,6 +394,27 @@ Ninety percent of the original 9.14 ms is **0.91 ms**, which leaves **0.16 ms
 for every monster** — about 2 µs a body. Nothing in this model reaches that by
 tuning; every path to it is a different shape of object.
 
+## Where a windowed frame goes
+
+With a device attached the frame is 6.08 ms and 4.3 ms of it is rendering. Hiding
+one subsystem at a time (`--hide`) prices them:
+
+| hidden | nodes | median | draw calls | frame |
+| --- | --- | --- | --- | --- |
+| nothing | — | 5.96 ms | 1940 | — |
+| tree leaves | 333 | 5.75 ms | 1748 | −0.21 |
+| trunks and leaves | 709 | 5.27 ms | 1541 | −0.69 |
+| backdrop trees | 364 | 5.89 ms | 1815 | −0.07 |
+| grass | 377 | 5.98 ms | 1896 | −0.00 |
+| boulders and pebbles | 105 | 5.91 ms | 1921 | −0.05 |
+
+The forest is the render budget: 709 nodes and 400 draw calls that cost three
+quarters of a millisecond. Nothing else is large, and the two trades that looked
+free are not: foliage still drawing but **not casting shadows** is worth nothing
+(the shadow pass is spent on props and trunks, not leaves), and turning 4x MSAA
+off is worth nothing measurable at all. Deleting the forest would buy 13% of the
+windowed frame, which is not a trade this game can make.
+
 ## What a monster costs, by how close it is
 
 `--keep=N` frees everything but the N nearest frontier mobs, so the frame can be

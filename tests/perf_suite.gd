@@ -82,6 +82,11 @@ var _sleep_all := false
 ## Frees every mob's presentation subtree, leaving the body: prices the rigs a
 ## crowd carries whether or not the camera is looking at them.
 var _no_rigs := false
+## Comma-separated node-name prefixes to hide, for pricing world subsystems in
+## the windowed build: `--hide=TreeLeaves_,Grass_`.
+var _hide := ""
+## Foliage still draws but stops writing to the shadow map.
+var _leaf_shadows_off := false
 ## Runs the suite against a tree from before the optimisation work, whose mobs
 ## own their physics step and whose snapshots are dictionaries. The same file
 ## runs on both sides so the two numbers are directly comparable.
@@ -117,6 +122,10 @@ func _initialize() -> void:
 			_legacy = text.substr(9).to_int() != 0
 		elif text.begins_with("--budget="):
 			_budget_ms = maxf(0.0, text.substr(9).to_float())
+		elif text.begins_with("--leafshadow="):
+			_leaf_shadows_off = text.substr(13).to_int() == 0
+		elif text.begins_with("--hide="):
+			_hide = text.substr(7)
 		elif text.begins_with("--norigs="):
 			_no_rigs = text.substr(9).to_int() != 0
 		elif text.begins_with("--sleepall="):
@@ -171,6 +180,17 @@ func _boot() -> void:
 	# The world builds once, before the first measured window: its cost is a
 	# load-time number, not a frame-time one.
 	print(Perf.summary("world."))
+	if not _hide.is_empty():
+		var prefixes := _hide.split(",", false)
+		var hidden := 0
+		for node in root.find_children("*", "Node3D", true, false):
+			var label := String(node.name)
+			for prefix in prefixes:
+				if label.begins_with(prefix):
+					(node as Node3D).visible = false
+					hidden += 1
+					break
+		print("PERF hidden nodes=%d prefixes=%s" % [hidden, _hide])
 	if _no_rigs:
 		for enemy in main.enemies:
 			if not is_instance_valid(enemy):
@@ -488,6 +508,14 @@ func _apply_render_cuts() -> void:
 	if _no_shadow:
 		for light in root.find_children("*", "DirectionalLight3D", true, false):
 			(light as DirectionalLight3D).shadow_enabled = false
+	if _leaf_shadows_off:
+		var toned := 0
+		for node in root.find_children("*", "GeometryInstance3D", true, false):
+			var label := String(node.name)
+			if label.begins_with("TreeLeaves_") or label.begins_with("BackdropLeaves_"):
+				(node as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				toned += 1
+		print("PERF leaf shadows off nodes=%d" % toned)
 	if _msaa >= 0:
 		root.get_viewport().msaa_3d = _msaa
 	if _shadow_distance > 0.0:
