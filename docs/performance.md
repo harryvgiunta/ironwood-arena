@@ -167,6 +167,11 @@ advancing and the body stops drawing — a freeze, not a release, so turning the
 camera back does not rebuild a mesh. Nineteen of a hundred mobs in a ring are
 in view at any moment, and that is worth about six percent of the dense case.
 
+The test samples the body at ankle and shoulder height, not once at its
+centre: a monster straddling the screen edge can have its feet outside the
+frustum and its torso inside, and freezing it there would show as a statue half
+on screen.
+
 It only applies where this peer's camera is the only viewer — offline, or on a
 client, whose camera is the one drawing the replicas. A host with remote peers
 cannot know what they can see. Ranger clones are exempt outright: the bow draw

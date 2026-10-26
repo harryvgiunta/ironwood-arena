@@ -3069,5 +3069,9 @@ func _step_mob_culling() -> void:
 			continue
 		enemy.skip_tick = not _enemy_relevant(enemy) and bool(enemy.get("alive")) != false
 		if cull_offscreen and is_instance_valid(camera):
-			enemy.offscreen = not camera.is_position_in_frustum(
-				enemy.global_position + Vector3(0.0, 1.0, 0.0))
+			# Two samples, not one: a body straddling the screen edge can have
+			# its feet outside the frustum and its torso inside, and freezing it
+			# there would show as a statue half on screen.
+			var at: Vector3 = enemy.global_position
+			enemy.offscreen = not (camera.is_position_in_frustum(at + Vector3(0.0, 0.35, 0.0))
+				or camera.is_position_in_frustum(at + Vector3(0.0, 1.7, 0.0)))
