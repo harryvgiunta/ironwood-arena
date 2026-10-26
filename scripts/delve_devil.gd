@@ -10,6 +10,7 @@ signal died(devil)
 signal struck(target, amount, position, outcome)
 
 const Geo = preload("res://scripts/geo.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const DevilVisual = preload("res://scripts/devil_visual.gd")
 const DevilMob = preload("res://scripts/devil_mob.gd")
 const SpeciesVisual = preload("res://scripts/devil_mob_visual.gd")
@@ -510,7 +511,9 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 	if face_intent.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-face_intent.x,-face_intent.z),minf(delta*10.0,1.0))
 	var before := global_position
+	Perf.begin("delve.slide")
 	move_and_slide()
+	Perf.end()
 	position.x = clampf(position.x,-LIMIT,LIMIT)
 	position.z = clampf(position.z,-LIMIT,LIMIT)
 	var actual := (global_position-before)/maxf(delta,0.0001)

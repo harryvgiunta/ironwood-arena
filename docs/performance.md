@@ -219,6 +219,19 @@ rule that is identical for every family (alive, and outside the town ring). The
 rule lives in `MobSenses` now and the callable is gone. It is worth a few
 percent of the sight pass and one fewer way for the two families to drift apart.
 
+### The delve does not have the frontier's problem
+
+The delve is the other place monsters spawn during play, so it was measured
+separately: twenty devils in a sanctuary cost **0.32 ms**, about 16 µs a body.
+Its devils still call `move_and_slide`, and it does not matter — the room floor
+is a box, not a forty-two-thousand-triangle frontier trimesh, so the step is
+cheap there. A live wave's frame is dominated by the four delvers' own rigs
+(0.21 ms), not by the monsters.
+
+What a delve wave does cost is **instantiating** them: about a millisecond a
+body to enter the tree, which is why the wave budget adds three per frame
+rather than however many fell due at once.
+
 ### A burst of bodies costs the engine a frame
 
 Adding a hundred monsters in one frame — which only the benchmark does; the
