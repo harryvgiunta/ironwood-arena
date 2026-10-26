@@ -198,14 +198,7 @@ func _ready() -> void:
 	collision.shape = shape
 	collision.position.y = shape.height * 0.5
 	add_child(collision)
-	_body = Node3D.new()
-	add_child(_body)
-	Perf.begin("spawn.body")
-	_visual = _visual_script().new()
-	_visual.mob_id = mob_id
-	_visual.profile = profile
-	_body.add_child(_visual)
-	Perf.end()
+	_build_rig()
 	add_to_group(_group_name())
 	# One shared group for every wilderness mob: a struck mob's cry reaches
 	# whatever is close enough to hear it.
@@ -244,6 +237,10 @@ func _visual_script():
 
 func _physics_process(delta: float) -> void:
 	if replica:
+		# A replica still owns its presentation: on a client it is the only
+		# thing drawing the mob, so it wants the same distance culling and the
+		# same rig release the host's own bodies get.
+		_apply_presentation(_lod_distance())
 		return
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
@@ -633,7 +630,7 @@ func _enter_dead(announce: bool) -> void:
 	if announce:
 		defeated.emit(self, int(profile.gold))
 	# Hold the authored death pose for the shared five minutes, then dissolve.
-	CorpseHold.hold(self, _body)
+	CorpseHold.hold(self, _body if is_instance_valid(_body) else self)
 
 
 ## One body's wire record: see `scripts/mob_wire.gd` for the slot layout.
@@ -766,15 +763,54 @@ func _lod_distance() -> float:
 
 ## Freezes the rig beyond the animation range. Only a real world does this: a
 ## mob built in a bare test scene keeps animating so its clip can be read.
+## Builds the presentation subtree: the container and the species sampler.
+## Used both when the body is first added and when a rig that was released at
+## range is rebuilt on approach.
+func _build_rig() -> void:
+	_body = Node3D.new()
+	add_child(_body)
+	Perf.begin("spawn.body")
+	_visual = _visual_script().new()
+	_visual.mob_id = mob_id
+	_visual.profile = profile
+	_body.add_child(_visual)
+	Perf.end()
+
+
+## Releases the presentation subtree entirely. A skinned body costs about
+## fourteen microseconds a frame simply by existing -- a node, a render
+## instance and a skeleton -- which freezing its clip does not remove. Only a
+## body far enough to be neither seen nor hit gives that up.
+func _release_rig() -> void:
+	if is_instance_valid(_visual):
+		_visual.set_frozen(true)
+	_visual = null
+	if is_instance_valid(_body):
+		_body.free()
+	_body = null
+
+
 func _apply_presentation(distance: float) -> void:
-	if _body == null or terrain == null:
+	# A released rig has no `_body`; that is exactly the case the rebuild below
+	# exists for, so only a missing world bails out here.
+	if terrain == null:
 		return
 	var live := MobLod.should_animate(distance)
 	if live != _presenting:
 		_presenting = live
-		_body.visible = live
-		if is_instance_valid(_visual):
-			_visual.set_frozen(not live)
+		if _body == null and live:
+			# Coming back into range: rebuild the rig and let the next tick's
+			# `set_motion`/`set_combat` put it in the right clip.
+			_build_rig()
+		elif _body != null:
+			_body.visible = live
+			if is_instance_valid(_visual):
+				_visual.set_frozen(not live)
+	if not live and _body != null and distance > MobLod.RELEASE_RANGE:
+		_release_rig()
+		return
+	if _body == null:
+		return
 	var stride := MobLod.anim_stride(distance)
 	if stride != _anim_stride:
 		_anim_stride = stride

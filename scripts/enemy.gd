@@ -129,12 +129,7 @@ func _ready() -> void:
 	collision.shape = shape
 	collision.position.y = shape.height * 0.5
 	add_child(collision)
-	_body = Node3D.new()
-	add_child(_body)
-	if kind == 0:
-		_build_wolf_visual()
-	else:
-		_build_devil_visual()
+	_build_rig()
 	var warning_radius := 0.85 if kind == 2 else 1.5
 	var warning_material := Geo.material(Color(0.95, 0.22, 0.08, 0.38))
 	warning_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -186,6 +181,30 @@ func _ready() -> void:
 				_orbit_angle = atan2(start.z,start.x)+float(seeded)*0.62
 		state = "CIRCLE"
 
+## Builds the presentation subtree. Shared by the first spawn and by a rig
+## that was released at range and is being rebuilt on approach.
+func _build_rig() -> void:
+	_body = Node3D.new()
+	add_child(_body)
+	if kind == 0:
+		_build_wolf_visual()
+	else:
+		_build_devil_visual()
+
+
+## Releases the presentation subtree; see `devil_mob._release_rig`.
+func _release_rig() -> void:
+	if is_instance_valid(_wolf):
+		_wolf.set_frozen(true)
+	if is_instance_valid(_devil):
+		_devil.set_frozen(true)
+	_wolf = null
+	_devil = null
+	if is_instance_valid(_body):
+		_body.free()
+	_body = null
+
+
 func _build_wolf_visual() -> void:
 	_wolf = WolfVisual.new()
 	_wolf.name = "WolfVisual"
@@ -211,7 +230,7 @@ func blood_scale() -> float:
 
 func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):
-		return _devil.weapon_anchor()
+		return _devil.weapon_anchor() if is_instance_valid(_devil) else null
 	return null
 
 ## The limb or muzzle that landed the blow, for the blood it carried away: a
@@ -245,6 +264,10 @@ func head_hit_profile() -> Vector2:
 
 func _physics_process(delta: float) -> void:
 	if replica:
+		# A replica still owns its presentation: on a client it is the only
+		# thing drawing the mob, so it wants the same distance culling and the
+		# same rig release the host's own bodies get.
+		_apply_presentation(_lod_distance())
 		return
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
@@ -922,16 +945,26 @@ func _lod_distance() -> float:
 
 ## Freezes the rig beyond the animation range. Only a real world does this.
 func _apply_presentation(distance: float) -> void:
-	if _body == null or terrain == null:
+	# A released rig has no `_body`; that is exactly the case the rebuild below
+	# exists for, so only a missing world bails out here.
+	if terrain == null:
 		return
 	var live := MobLod.should_animate(distance)
 	if live != _presenting:
 		_presenting = live
-		_body.visible = live
-		if is_instance_valid(_wolf):
-			_wolf.set_frozen(not live)
-		if is_instance_valid(_devil):
-			_devil.set_frozen(not live)
+		if _body == null and live:
+			_build_rig()
+		elif _body != null:
+			_body.visible = live
+			if is_instance_valid(_wolf):
+				_wolf.set_frozen(not live)
+			if is_instance_valid(_devil):
+				_devil.set_frozen(not live)
+	if not live and _body != null and distance > MobLod.RELEASE_RANGE:
+		_release_rig()
+		return
+	if _body == null:
+		return
 	var stride := MobLod.anim_stride(distance)
 	if stride != _anim_stride:
 		_anim_stride = stride

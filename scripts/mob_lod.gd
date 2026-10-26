@@ -25,6 +25,11 @@ const ANIMATE_RANGE := 45.0
 ## it animates every other frame, which halves the bone work of every body that
 ## is not right in front of the player and reads identically at that distance.
 const ANIMATE_NEAR := 12.0
+## Past this a body's presentation subtree is released rather than frozen, and
+## rebuilt when it comes back inside `ANIMATE_RANGE`. The gap between the two
+## is hysteresis: a body pacing the boundary must not build and free a rig
+## every second.
+const RELEASE_RANGE := 58.0
 ## Metres to the nearest ranger at which each stride takes over.
 const NEAR := 22.0
 const MID := 55.0

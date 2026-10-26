@@ -6,6 +6,7 @@ extends SceneTree
 
 const Visual = preload("res://scripts/forest_mob_visual.gd")
 const Mob = preload("res://scripts/forest_mob.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 
 const MOBS := {
 	"hollow_warden": {
@@ -417,9 +418,22 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 	check(forest_mobs.size() == 19,
 		"frontier spawns 19 live forest mobs (found %d)" % forest_mobs.size())
 	var kinds := {}
+	var shown := 0
+	var released := 0
 	for mob in forest_mobs:
 		kinds[int(mob.get("kind"))] = true
-		check(is_instance_valid(mob.get("_visual")), "every frontier forest mob has an imported visual")
+		# The rig exists only inside the release range; see `MobLod`.
+		var range: float = mob.global_position.distance_to(frontier.player.global_position)
+		if range <= MobLod.ANIMATE_RANGE:
+			check(is_instance_valid(mob.get("_visual")),
+				"a frontier forest mob in view has an imported visual")
+			shown += 1
+		elif range > MobLod.RELEASE_RANGE:
+			check(not is_instance_valid(mob.get("_visual")),
+				"a forest mob beyond the release range carries no rig")
+			released += 1
+	check(shown > 0, "the frontier fields forest mobs in view")
+	check(released > 0, "the far forest releases its mob rigs")
 	for expected in [9, 10, 11]:
 		check(kinds.has(expected), "frontier includes forest kind %d" % expected)
 	# Threshold trio: one of each species inside the safe ring, on screen from

@@ -139,6 +139,24 @@ third of a frontier frame.
 fresh array per mob per frame, four milliseconds of the frame. The same pass
 against a square-metre bucket grid reads the nine cells around the body.
 
+### A distant body has no rig at all
+
+A skinned body costs about **fourteen microseconds a frame simply by
+existing** — a physics body, a scene node, a render instance and a skeleton —
+and freezing its clip does not remove any of that. So past **58 m** a mob's
+presentation subtree is *freed*, not frozen, and rebuilt when it comes back
+inside **45 m**. The gap between those two numbers is hysteresis: a body pacing
+the boundary must not build and free a rig every second.
+
+The rebuilt rig starts at the top of its idle clip on the frame the ranger
+comes back, which is the one visible cost of the trade and it happens at the
+edge of the treeline. Replicas on a client run the same culling — they own the
+only copy of a mob a client draws, so they get the same saving.
+
+`devil_mobs_regression` and `forest_mobs_regression` pin both halves: a body in
+view has its imported visual, a body past the release range has none, and a
+released body that comes back rebuilds it and is playing a clip.
+
 ### Blood on a body no longer costs a frame
 
 Measuring a rig to lay blood on it — every visible skinned vertex binned into
@@ -194,9 +212,9 @@ machine, so treat the last digit as noise.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 2.90 ms | −68% |
-| Headless, 175 mobs fighting | 36.13 ms | 10.15 ms | −72% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 7.78 ms | −59% |
+| Headless, frontier idle | 9.14 ms | 2.28 ms | −75% |
+| Headless, 175 mobs fighting | 36.13 ms | 8.91 ms | −75% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.88 ms | −64% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |
@@ -204,7 +222,7 @@ machine, so treat the last digit as noise.
 | Host upload, 133 mobs | 507 KB/s | 152 KB/s | −70% |
 
 The frame rate that matters to a player — the windowed frontier — went from
-**52 fps to about 129 fps**.
+**52 fps to about 145 fps**.
 
 Three suites fail on `main` as well as here, and are not regressions:
 `devil_regression` (2: the cinder devil's death clip and corpse head drop),
@@ -220,10 +238,10 @@ broadphase keeping a hundred and seventy-five hit bodies hittable.
 ### Where the budget actually is
 
 Freeing every frontier mob leaves **0.92 ms** — the world, the ranger and the
-loop. The seventy-five mobs cost the other **1.91 ms**, which is **26 µs per
-body per frame**: about 12 µs of script and 14 µs of engine (a physics body, a
-scene node, a render instance and a skeleton, even with the clip frozen at
-distance).
+loop. The seventy-five mobs cost the rest: **1.91 ms** before rigs were
+released and **1.35 ms** after, which is **18 µs per body per frame** — about
+12 µs of script and the remainder engine, now that only the bodies in view
+carry a rig.
 
 That is the whole picture, and it has a blunt consequence: `main`'s frame was
 9.14 ms, so a ninety percent cut is 0.91 ms — **the world's cost with no mobs
@@ -232,11 +250,9 @@ however far the per-mob cost falls; it needs a cheaper *model* of a mob.
 
 In rough order of payoff, for whoever picks this up:
 
-- **Stop paying 14 µs per body to exist.** Freeing a distant mob's rig instead
-  of just freezing it is the only lever of that size left. It is not a small
-  change: corpse poses, blood anchors, head zones and the animation sampler all
-  reach through the visual, and several suites inspect frontier mob rigs at
-  their authored spawn distances.
+- **Stop paying for a body to exist at all.** Releasing distant rigs recovered
+  the skinned half; what is left is the physics body and the scene node
+  (roughly 6 µs of the 18).
 - **A cheaper mob model altogether** — instanced or aggregate bodies for the
   rank and file, with full nodes only for the ones in reach. This is what a
   ninety percent cut actually looks like.

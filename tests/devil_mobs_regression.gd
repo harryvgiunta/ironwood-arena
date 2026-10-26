@@ -6,6 +6,7 @@ extends SceneTree
 
 const Visual = preload("res://scripts/devil_mob_visual.gd")
 const Mob = preload("res://scripts/devil_mob.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 
 const MOBS := {
 	"hell_goat": {
@@ -396,9 +397,25 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 	var devils := get_nodes_in_group("devil_mobs")
 	check(devils.size() == 16, "frontier spawns 16 live devil mobs (found %d)" % devils.size())
 	var kinds := {}
+	var shown := 0
+	var released := 0
 	for devil in devils:
 		kinds[int(devil.get("kind"))] = true
-		check(is_instance_valid(devil.get("_visual")), "every frontier devil has an imported visual")
+		# A rig exists only while the body is close enough to be seen: past
+		# `MobLod.RELEASE_RANGE` the presentation subtree is freed outright,
+		# because a skinned body costs about fourteen microseconds a frame just
+		# by existing. It is rebuilt when the ranger comes back.
+		var range: float = devil.global_position.distance_to(frontier.player.global_position)
+		if range <= MobLod.ANIMATE_RANGE:
+			check(is_instance_valid(devil.get("_visual")),
+				"a frontier devil in view has an imported visual")
+			shown += 1
+		elif range > MobLod.RELEASE_RANGE:
+			check(not is_instance_valid(devil.get("_visual")),
+				"a frontier devil beyond the release range carries no rig")
+			released += 1
+	check(shown > 0, "the frontier fields devils in view")
+	check(released > 0, "the far frontier releases its devil rigs")
 	for expected in [3, 4, 5, 6, 7]:
 		check(kinds.has(expected), "frontier includes devil kind %d" % expected)
 	# Starting court: one of each species must be inside the safe ring, on
@@ -423,5 +440,20 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 		if camera != null:
 			check(camera.is_position_in_frustum(devil.get_aim_position()),
 				str(devil.get("mob_id")) + " is inside the spawn camera frustum")
+	# ...and gets it back: a released body that comes into range rebuilds its
+	# rig, because a rig that never returns would be an invisible monster.
+	var away := []
+	for devil in devils:
+		if not is_instance_valid(devil.get("_visual")):
+			away.append(devil)
+	if not away.is_empty():
+		var returning = away[0]
+		returning.global_position = frontier.player.global_position + Vector3(6.0, 0.0, 4.0)
+		for frame in 12:
+			await physics_frame
+		check(is_instance_valid(returning.get("_visual")),
+			"a released devil rebuilds its rig when it comes back into range")
+		check(returning.get("_visual").get_clip_name() != "",
+			"the rebuilt rig is playing a clip")
 	frontier.queue_free()
 	await process_frame
