@@ -772,6 +772,7 @@ func _process(delta: float) -> void:
 		hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 		Perf.end()
 	Perf.end()
+	Perf.end()
 
 func _sample_floor(point: Vector3) -> float:
 	_floor_query.from = point + Vector3(0, 1.15, 0)

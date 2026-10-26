@@ -45,6 +45,11 @@ static var frames := 0
 static var frame_us := 0
 static var frame_peak_us := 0
 static var _last_tick := 0
+## Frames that began while a scope from the previous frame was still open. A
+## non-zero count means a `begin` is missing its `end`, which silently nests
+## everything after it; the report shouts about it rather than quietly
+## attributing time to the wrong parent.
+static var imbalanced := 0
 
 
 static func reset() -> void:
@@ -59,6 +64,7 @@ static func reset() -> void:
 	_open_child = PackedInt64Array()
 	_depth = 0
 	frames = 0
+	imbalanced = 0
 	frame_us = 0
 	frame_peak_us = 0
 	_last_tick = 0
@@ -114,6 +120,9 @@ static func end() -> void:
 static func tick() -> void:
 	if not enabled:
 		return
+	if _depth != 0:
+		imbalanced += 1
+		_depth = 0
 	var now := Time.get_ticks_usec()
 	if _last_tick > 0:
 		var spent := now - _last_tick
@@ -153,8 +162,9 @@ static func report(title: String, budget_us: int = 0) -> String:
 	var lines := PackedStringArray()
 	lines.append("")
 	lines.append("=== %s ===" % title)
-	lines.append("frames=%d  avg frame=%.2f ms  worst frame=%.2f ms" % [
-		frames, float(frame_us) / float(scale) / 1000.0, float(frame_peak_us) / 1000.0])
+	lines.append("frames=%d  avg frame=%.2f ms  worst frame=%.2f ms  imbalanced=%d" % [
+		frames, float(frame_us) / float(scale) / 1000.0, float(frame_peak_us) / 1000.0,
+		imbalanced])
 	if count == 0:
 		lines.append("(no scopes: frame clock only)")
 		lines.append("")
