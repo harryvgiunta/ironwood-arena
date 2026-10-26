@@ -5,6 +5,37 @@ physics ticks a second, with the host's network clock, every mob's brain and
 every ranger's animation sampled on that same tick. This file records how the
 budget is measured, what it cost, and what was changed to bring it down.
 
+## In short
+
+A frontier frame went from **9.14 ms to 1.75 ms** of compute, and from
+**19.14 ms to 6.08 ms** windowed (52 → ~165 fps). A monster spawn no longer
+stalls the frames after it (13.3 → 1.9 ms), the first blow of a session no
+longer stalls at all (135 → 28 ms), and the host's mob upload is a third of
+what it was (507 → 152 KB/s) with no replica starved under four times a bad
+connection's jitter.
+
+Two thirds of that came from one finding: a mob was paying for a physics step
+every frame to slide a centimetre, so it now walks on the world's own height
+field and navigation grid instead — **90 µs a body to 1.6 µs**.
+
+| | before | after |
+| --- | --- | --- |
+| Headless frontier | 9.14 ms | **1.75 ms** |
+| Headless, 175 mobs fighting | 36.13 ms | **6.50 ms** |
+| Windowed frontier | 19.14 ms, 52 fps | **6.08 ms, ~165 fps** |
+| Spawn 30, frames after | 13.3 ms, all over budget | **1.9 ms, none over** |
+| First blow of a session | 135 ms | **28 ms** |
+| Host upload, 133 mobs | 507 KB/s | **152 KB/s** |
+| Mob replicas starved, 4× jitter | — | **0** |
+
+**The ninety-percent target is not reached, and where it lives is now a
+number, not an unknown:** five monsters within about fifty-five metres of the
+ranger is 0.91 ms, which is exactly ninety percent of the original. The
+frontier fields about thirty there by design. Section *Choosing the next ten
+percent* prices the three ways to close it; seventeen experiments that were
+tried and did not pay are listed under *Measured and dismissed*.
+
+
 ## The suite
 
 `tests/perf_suite.gd` is the benchmark. It runs the real `main.tscn` headless
