@@ -378,10 +378,13 @@ measured by taking one thing away and re-measuring:
 | **Total** | **~1.75** | |
 
 The rigs inside the first row were priced separately: freeing the presentation
-of the thirty-four bodies that have one moves the frame by 0.23 ms, so a
-monster's animated rig is **6-ish µs a frame**. A body with an *empty* scripted
-tick and a collision shape measures **0.19 µs** — Godot's per-node cost is not
-what any of this is.
+subtree of every mob moves a headless frame by **0.15-0.24 ms** depending on the
+scene, and most of that is the per-frame calls *into* the sampler rather than
+the rig's own processing — with a dummy renderer there is no skinning or draw to
+save. A monster's rig is a **rendering** cost: it shows up in the windowed
+numbers, where freezing the offscreen ones was worth 0.16 ms, not in the
+headless ones. A body with an *empty* scripted tick and a collision shape
+measures **0.19 µs** — Godot's per-node cost is not what any of this is.
 
 So a monster near the ranger costs 17-27 µs, split roughly three ways between
 its rig, its tick and the script inside that tick, and every one of those parts

@@ -79,6 +79,9 @@ var _keep := -1
 ## exists" from "the body does anything". One `set_physics_process` per mob at
 ## boot — a per-frame version costs more than the tick it suppresses.
 var _sleep_all := false
+## Frees every mob's presentation subtree, leaving the body: prices the rigs a
+## crowd carries whether or not the camera is looking at them.
+var _no_rigs := false
 ## Runs the suite against a tree from before the optimisation work, whose mobs
 ## own their physics step and whose snapshots are dictionaries. The same file
 ## runs on both sides so the two numbers are directly comparable.
@@ -114,6 +117,8 @@ func _initialize() -> void:
 			_legacy = text.substr(9).to_int() != 0
 		elif text.begins_with("--budget="):
 			_budget_ms = maxf(0.0, text.substr(9).to_float())
+		elif text.begins_with("--norigs="):
+			_no_rigs = text.substr(9).to_int() != 0
 		elif text.begins_with("--sleepall="):
 			_sleep_all = text.substr(11).to_int() != 0
 		elif text.begins_with("--keep="):
@@ -166,6 +171,21 @@ func _boot() -> void:
 	# The world builds once, before the first measured window: its cost is a
 	# load-time number, not a frame-time one.
 	print(Perf.summary("world."))
+	if _no_rigs:
+		for enemy in main.enemies:
+			if not is_instance_valid(enemy):
+				continue
+			# A clone owns an Archer rig; freeing it breaks every caller.
+			if enemy.has_method("configure") and enemy.get("bounds") != null:
+				continue
+			var body = enemy.get("_body")
+			if is_instance_valid(body):
+				body.free()
+			enemy.set("_body", null)
+			enemy.set("_visual", null)
+			enemy.set("_wolf", null)
+			enemy.set("_devil", null)
+			enemy.set("_presenting", false)
 	if _sleep_all:
 		# One-time, not per frame: a per-frame `set()` on every mob costs more
 		# than the tick it suppresses.
