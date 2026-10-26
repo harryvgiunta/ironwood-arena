@@ -72,6 +72,9 @@ var _no_mobs := false
 ## should be: the profiler's own begin/end pairs cost something, and the
 ## per-mob ones are the largest single contributor.
 var _no_scopes := false
+## Keep only the `--keep` nearest frontier mobs and free the rest: the
+## population curve, for deciding how many monsters a frame budget buys.
+var _keep := -1
 ## Runs the suite against a tree from before the optimisation work, whose mobs
 ## own their physics step and whose snapshots are dictionaries. The same file
 ## runs on both sides so the two numbers are directly comparable.
@@ -107,6 +110,8 @@ func _initialize() -> void:
 			_legacy = text.substr(9).to_int() != 0
 		elif text.begins_with("--budget="):
 			_budget_ms = maxf(0.0, text.substr(9).to_float())
+		elif text.begins_with("--keep="):
+			_keep = maxi(0, text.substr(7).to_int())
 		elif text.begins_with("--noscopes="):
 			_no_scopes = text.substr(11).to_int() != 0
 		elif text.begins_with("--nomobs="):
@@ -155,6 +160,20 @@ func _boot() -> void:
 	# The world builds once, before the first measured window: its cost is a
 	# load-time number, not a frame-time one.
 	print(Perf.summary("world."))
+	if _keep >= 0:
+		var ordered := []
+		for enemy in main.enemies:
+			if is_instance_valid(enemy):
+				ordered.append(enemy)
+		ordered.sort_custom(func(a, b) -> bool:
+			return a.global_position.distance_squared_to(main.player.global_position) \
+				< b.global_position.distance_squared_to(main.player.global_position))
+		for index in range(_keep, ordered.size()):
+			var doomed = ordered[index]
+			if main._enemies_by_index.has(doomed):
+				main._enemies_by_index[main._enemies_by_index.find(doomed)] = null
+			main.enemies.erase(doomed)
+			doomed.free()
 	if _no_mobs:
 		for enemy in main.enemies:
 			if is_instance_valid(enemy):

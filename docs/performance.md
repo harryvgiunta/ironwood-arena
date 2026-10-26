@@ -368,6 +368,35 @@ Ninety percent of the original 9.14 ms is **0.91 ms**, which leaves **0.16 ms
 for every monster** — about 2 µs a body. Nothing in this model reaches that by
 tuning; every path to it is a different shape of object.
 
+## What a monster costs, by how close it is
+
+`--keep=N` frees everything but the N nearest frontier mobs, so the frame can be
+plotted against population (`--noscopes`, median of the run):
+
+| mobs kept | nearest is | median frame |
+| --- | --- | --- |
+| 0 | — | 0.75 ms |
+| 10 | inside ~25 m | 1.06 ms |
+| 20 | inside ~40 m | 1.32 ms |
+| 30 | inside ~55 m | 1.62 ms |
+| 45 | inside ~80 m | 1.71 ms |
+| 60 | inside ~110 m | 1.80 ms |
+| 75 | the whole frontier | 1.78 ms |
+
+The knee is at about thirty. **The first thirty monsters cost 0.87 ms — 29 µs
+each — and the next forty-five cost 0.16 ms, 3.5 µs each.** That is the culling
+and rig release working exactly as intended: a monster nobody can see is nearly
+free, and the price of the frontier is set by the handful standing near the
+ranger, not by how many were authored.
+
+In a room where every monster is close — the hundred-mob benchmark — the same
+bodies cost closer to 55 µs each, because they are all in reach, fighting, and
+separating, so more of them run at the thirty-hertz fight rate.
+
+This is the number the ninety-percent question actually turns on: the target
+leaves 0.16 ms for monsters, which is about five nearby bodies in the current
+model, or one that costs a seventh as much.
+
 ## What is left
 
 In rough order of payoff, for whoever picks this up:
