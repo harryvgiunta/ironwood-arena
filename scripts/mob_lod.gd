@@ -28,13 +28,21 @@ const ANIMATE_NEAR := 12.0
 ## Metres to the nearest ranger at which each stride takes over.
 const NEAR := 22.0
 const MID := 55.0
-## Physics ticks between ticks, per tier: 60 Hz, 30 Hz, 15 Hz, 5 Hz.
-const STRIDE_NEAR := 2
-const STRIDE_MID := 4
+## Physics ticks between ticks, per tier: 30 Hz in a fight, 20 Hz close by,
+## 10 Hz in the middle distance, 5 Hz beyond.
+const STRIDE_ATTACK := 2
+const STRIDE_NEAR := 3
+const STRIDE_MID := 6
 const STRIDE_FAR := 12
 
 
-static func stride_for(distance: float) -> int:
+## `ready` is the mob's own readiness to swing: a body whose cooldown is up, or
+## which is already winding up, striking or recovering, thinks at thirty hertz
+## whatever the range, because that is the part of a fight a player reads. The
+## rest of a pack — orbiting, waiting out a cooldown, walking home — does not.
+static func stride_for(distance: float, ready := false) -> int:
+	if ready:
+		return STRIDE_ATTACK
 	if distance < NEAR:
 		return STRIDE_NEAR
 	if distance < MID:

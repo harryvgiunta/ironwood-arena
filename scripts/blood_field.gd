@@ -1,4 +1,5 @@
 extends Node3D
+
 ## Owns every blood stain in one scene: surface patches, body and weapon
 ## coatings, and the short-lived spray bursts. Spatter, body and weapon stains
 ## live for 60 seconds, fade over the last three, and are recycled oldest-first
@@ -7,6 +8,7 @@ extends Node3D
 ## lazily by `BloodFx.field_for`.
 
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const BloodSurface = preload("res://scripts/blood_surface.gd")
 
 const PATCH_SEGMENTS := 12
@@ -437,7 +439,9 @@ func _release_attachment(node: Node) -> void:
 
 func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 		lethal: bool, scale: float, localized: bool = false) -> void:
+	Perf.begin("stain.measure")
 	var body := BloodSurface.body_for(rig)
+	Perf.end()
 	if body.is_empty():
 		return
 	var signature := int(body.get("signature", 0))
@@ -492,6 +496,7 @@ func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 	if placed == 0:
 		tool.clear()
 		return
+	Perf.begin("stain.commit")
 	var mesh := tool.commit()
 	if mesh == null or mesh.get_surface_count() == 0:
 		return
@@ -504,6 +509,7 @@ func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 	node.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	anchor.add_child(node)
 	_register_stain(node, rig, "soak", MAX_BODY_STAINS, lifetime)
+	Perf.end()
 
 ## An arrow carries a smear, not a blade coating: a wet skim on the shaft just
 ## behind the head and two specks. Sized from the shaft, never the fletching.

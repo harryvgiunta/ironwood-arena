@@ -111,10 +111,13 @@ an obstacle is nudged onto the nearest open ground.
 ### Mobs think on a stride
 
 `scripts/mob_lod.gd`. Sight, spacing, the state machine and the ground step are
-per-tick costs, and none of them need sixty hertz. Mobs run their brains every
-second frame inside 22 m, every fourth out to 55 m, and every twelfth beyond
-that. A decimated tick scales `delta`, so speeds, cooldowns and state timers
-stay in real time.
+per-tick costs, and none of them need sixty hertz. A mob that is inside its
+swing window — winding up, striking or recovering, or ready to swing and
+already in reach — thinks every second tick. Everything else thinks every
+third tick inside 22 m, every sixth out to 55 m, and every twelfth beyond. A
+decimated tick scales `delta`, so speeds, cooldowns and state timers stay in
+real time. The distinction matters: a hundred devils standing in a ring around
+one ranger are a hundred orbits, not a hundred fights.
 
 Spacing is a soft constraint on top of that: it is re-measured one frame in six
 and the result reused, staggered per mob so a hundred bodies do not all measure
@@ -133,6 +136,25 @@ third of a frontier frame.
 `wild_mobs` group — with 175 bodies that is thirty thousand distance tests and a
 fresh array per mob per frame, four milliseconds of the frame. The same pass
 against a square-metre bucket grid reads the nine cells around the body.
+
+### Blood on a body no longer costs a frame
+
+Measuring a rig to lay blood on it — every visible skinned vertex binned into
+its dominant bone, then into 288 radial cells — allocated two small arrays for
+every vertex and re-extracted every mesh surface for every body. The first
+blow on each devil therefore cost **20-37 ms inside the hit**, and a room of
+them stalled on every new attacker. Three changes:
+
+- the per-vertex array pair became scalars, which is most of the cost;
+- the rig sample is capped at eight thousand vertices, still far more than the
+  288 cells a profile can hold;
+- extracted surface arrays are cached per mesh, and the measurement itself is
+  shared by **structure** rather than by instance — every devil of a species
+  has the same garment, so it is measured once and the copy handed out is
+  rebound to the caller's own skeleton.
+
+The first bleed of each species still pays for its own measurement; every body
+after it does not.
 
 ### Monsters are cheaper to add
 
@@ -165,21 +187,22 @@ square. `world_style.gd` authors this per region
 ## What it costs now
 
 Medians of three runs; "before" is the same suite against the same scene at
-`main`'s commit.
+`main`'s commit. Frame figures move by about eight percent between runs on this
+machine, so treat the last digit as noise.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 3.09 ms | −66% |
-| Headless, 175 mobs fighting | 36.13 ms | 12.03 ms | −67% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 7.26 ms | −62% |
+| Headless, frontier idle | 9.14 ms | 2.90 ms | −68% |
+| Headless, 175 mobs fighting | 36.13 ms | 10.15 ms | −72% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 7.78 ms | −59% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
-| Adding one monster | 1.36 ms | 1.03 ms | −24% |
-| Thirty monsters in one frame | 40.7 ms | 30.9 ms | −24% |
+| Adding one monster | 1.36 ms | ~1.1 ms | −20% |
+| The first blow that lands on a body | 20-37 ms | ~3 ms after the species' first | |
 | Host upload, 133 mobs | 507 KB/s | 152 KB/s | −70% |
 
 The frame rate that matters to a player — the windowed frontier — went from
-**52 fps to 138 fps**.
+**52 fps to about 129 fps**.
 
 Three suites fail on `main` as well as here, and are not regressions:
 `devil_regression` (2: the cinder devil's death clip and corpse head drop),
@@ -194,15 +217,25 @@ broadphase keeping a hundred and seventy-five hit bodies hittable.
 
 In rough order of payoff, for whoever picks this up:
 
-- **Analytic mob hitboxes.** The bodies are only hittable through their
-  `CollisionShape3D`; a capsule test against the mob table (the pattern
-  `lag_compensation.gd` already uses) would let the bodies leave the physics
-  server entirely.
-- **Fewer scatter surfaces.** The frontier is draw-call bound, not
-  primitive bound: 1940 calls cost more than the 0.87 M triangles do. Larger
-  tree and ground-cover chunks would cut calls directly.
-- **A shadow range of twenty metres** costs another 0.3 ms and 550 draw calls,
-  if the look can take it.
+- **Stream distant rigs, don't just freeze them.** A skinned body that exists
+  at all costs about **18 µs a frame** on this machine — measured by adding a
+  hundred inert replicas: 3.55 ms, of which only 0.05 ms is collision. Freezing
+  the animation (already done past 45 m) removes the clip work but not the
+  node, render instance and skeleton. Releasing them entirely and rebuilding on
+  approach is the one large lever left, and it is not free: corpse poses, blood
+  anchors and head zones all reach through the visual.
 - **One brain for a pack.** A hundred mobs in one room do a hundred sight rays,
   a hundred spacing walks and a hundred state machines to produce what is, in
   practice, one fight.
+- **A faster shadow cascade** rather than a shorter one: the pass is half the
+  draw calls at 60 m, and a cheaper split count or a cached static depth would
+  keep the look.
+
+Measured and dismissed, so nobody repeats them:
+
+- **Replacing the mob bodies with analytic hitboxes** — the shapes cost 0.05 ms
+  across 175 bodies once locomotion stopped querying the physics server.
+- **Coarser scatter chunks** — 44 m to 96 m moved draw calls by 4% and grew the
+  primitive count by 16%; the frontier is not chunk-bound.
+- **Turning anti-aliasing off** — 0.33 ms for the whole frame at 4x MSAA,
+  because the GPU is not the bottleneck on this scene.

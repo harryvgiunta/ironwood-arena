@@ -251,7 +251,7 @@ func _physics_process(delta: float) -> void:
 		return
 	var nearest := _lod_distance()
 	_apply_presentation(nearest)
-	var stride := MobLod.stride_for(nearest)
+	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
 	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
 		return
 	if stride != _lod_stride:
@@ -936,3 +936,11 @@ func _apply_presentation(distance: float) -> void:
 			_wolf.set_anim_stride(stride)
 		if is_instance_valid(_devil):
 			_devil.set_anim_stride(stride)
+
+
+## True while this mob is in, or about to start, a swing.
+func _attack_ready(distance: float) -> bool:
+	if state == "WINDUP" or state == "STRIKE" or state == "RECOVER" \
+			or state == "SHOOT" or state == "LEAP" or state == "DIVE":
+		return true
+	return _attack_cooldown <= 0.0 and distance <= maxf(_attack_reach, 2.6) + 1.0

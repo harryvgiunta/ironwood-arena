@@ -1688,7 +1688,16 @@ func _on_party_descent(port: int) -> void:
 		session.arm_delve("delve-carry-client",_world_address,port,_player_name)
 	get_tree().change_scene_to_file("res://delve.tscn")
 
+## A landed mob blow: the guard outcome, the damage, its feedback and, in a
+## host session, the seat it belongs to. Wrapped by the profiler because a room
+## full of attackers spends real time in here.
 func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
+	Perf.begin("mob.hit")
+	_resolve_enemy_attack(attacker, amount, victim)
+	Perf.end()
+
+
+func _resolve_enemy_attack(attacker, amount: float, victim = null) -> void:
 	if not is_instance_valid(attacker) or not attacker.alive:
 		return
 	if victim != null and victim != player:
@@ -1719,12 +1728,16 @@ func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 		else:
 			hud.show_feedback("BLOCKED  /  -%d stamina" % int(cost),1.0)
 		return
+	Perf.begin("hit.damage")
 	take_damage(amount)
+	Perf.end()
 	# The unmitigated contact is the only branch that spilled blood. The attacker
 	# may carry a blade or a bare claw; `stain_attacker` owns both cases.
 	BloodFx.impact(attacker,player.global_position + Vector3(0,1.1,0),
 		player.global_position - attacker.global_position,amount,false)
+	Perf.begin("hit.stain")
 	BloodFx.stain_attacker(attacker,amount)
+	Perf.end()
 
 func _receive_seat_attack(attacker, amount: float, seat) -> void:
 	if not is_instance_valid(seat):
@@ -1752,8 +1765,10 @@ func take_damage(amount: float, react: bool = true) -> void:
 		archer.set_hit_react(seconds)
 		step.reset()
 	DamageNumbers.spawn(self,player.global_position,applied,"self",false,health <= 0.0)
+	Perf.begin("hit.wound")
 	BloodFx.wound(self,archer,player.global_position + Vector3(0,1.05,0),applied,
 		false,health <= 0.0,1.0)
+	Perf.end()
 	audio.play_sound("hit")
 	hud.flash_damage()
 	if health <= 0.0:

@@ -15,12 +15,25 @@ extends RefCounted
 const ANGLE_BUCKETS := 24
 const AXIAL_BANDS := 12
 const CELLS := ANGLE_BUCKETS * AXIAL_BANDS
-const MAX_SAMPLED_VERTICES := 16000
+## Vertices sampled per rig. A radial profile needs a dense sample to find the
+## outermost garment layer, but eight thousand is already far more than the
+## 288 cells a profile can store.
+const MAX_SAMPLED_VERTICES := 8000
 const CACHE_LIMIT := 96
 ## The stain sits this far off the measured surface so it never z-fights cloth.
 const LIFT := 0.003
 
 static var _cache: Dictionary = {}
+## Extracted skin arrays per mesh surface. Every devil of a species shares one
+## Mesh resource, so this is what stops the second body of that species from
+## re-extracting (and re-allocating) every vertex in order to measure itself.
+static var _surface_arrays: Dictionary = {}
+## Measured bodies by structure, not by instance. The profiles are stored in
+## bone-local space, so every body of one species is measured once and the copy
+## handed out is rebound to the caller's own skeleton. Without this, the first
+## blow on each of a hundred devils paid for a fresh measurement of the same
+## garment.
+static var _bodies: Dictionary = {}
 
 # --- measurement -----------------------------------------------------------
 
@@ -34,10 +47,54 @@ static func body_for(rig: Node3D) -> Dictionary:
 	var entry = _cache.get(key)
 	if entry != null and is_instance_valid(entry.rig) and int(entry.signature) == signature:
 		return entry.body
-	var body := _measure(rig)
+	var species := _species_key(rig, signature)
+	var template = _bodies.get(species)
+	var body: Dictionary
+	if template != null:
+		body = _rebind(template, rig)
+	else:
+		body = _measure(rig)
+		_bodies[species] = _template_of(body)
 	body["signature"] = signature
 	_cache[key] = {"signature": signature, "rig": rig, "body": body}
 	_prune()
+	return body
+
+
+## What makes two rigs structurally identical: the same visible skinned meshes
+## and the same bone count, which is what the measured profiles depend on.
+static func _species_key(rig: Node3D, signature: int) -> String:
+	var skeleton := _find_skeleton(rig)
+	var bones := skeleton.get_bone_count() if skeleton != null else 0
+	return "%d|%d" % [signature, bones]
+
+
+## A stub-free copy of a measurement: the profiles are kept, every live node
+## reference is dropped.
+static func _template_of(body: Dictionary) -> Dictionary:
+	var template := body.duplicate(true)
+	template.rig = null
+	template.skeleton = null
+	for profile in (template.bones as Dictionary).values():
+		(profile as Dictionary).skeleton = null
+	for carrier in template.primitives as Array:
+		(carrier as Dictionary).node = null
+	return template
+
+
+## A fresh copy of a shared measurement, pointed at this rig's own nodes.
+static func _rebind(template: Dictionary, rig: Node3D) -> Dictionary:
+	var body := template.duplicate(true)
+	body.rig = rig
+	var skeleton := _find_skeleton(rig)
+	body.skeleton = skeleton
+	for profile in (body.bones as Dictionary).values():
+		(profile as Dictionary).skeleton = skeleton
+	for carrier in body.primitives as Array:
+		var carrier_name := str((carrier as Dictionary).get("name", ""))
+		if carrier_name.is_empty():
+			continue
+		(carrier as Dictionary).node = rig.find_child(carrier_name, true, false)
 	return body
 
 ## The bone or primitive the blow's cloth belongs to. Thick limbs win ties, but
@@ -232,6 +289,24 @@ static func _measure(rig: Node3D) -> Dictionary:
 		body.primitives = _primitive_list(meshes)
 	return body
 
+## One mesh surface's vertex, bone and weight arrays, extracted once.
+static func _extract(mesh: Mesh, surface: int) -> Dictionary:
+	var key := mesh.get_instance_id() * 8 + surface
+	var found = _surface_arrays.get(key)
+	if found != null:
+		return found
+	var arrays := mesh.surface_get_arrays(surface)
+	var entry := {
+		"vertices": arrays[Mesh.ARRAY_VERTEX],
+		"bones": arrays[Mesh.ARRAY_BONES],
+		"weights": arrays[Mesh.ARRAY_WEIGHTS],
+	}
+	if _surface_arrays.size() > 256:
+		_surface_arrays.clear()
+	_surface_arrays[key] = entry
+	return entry
+
+
 static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 	var empty := {"bones": {}}
 	var bone_count := skeleton.get_bone_count()
@@ -277,8 +352,7 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 		if mesh_node.skin == null or mesh_node.mesh == null:
 			continue
 		for surface in mesh_node.mesh.get_surface_count():
-			var arrays := mesh_node.mesh.surface_get_arrays(surface)
-			var vertices = arrays[Mesh.ARRAY_VERTEX]
+			var vertices = _extract(mesh_node.mesh, surface).vertices
 			if vertices != null:
 				total += (vertices as PackedVector3Array).size()
 	var step: int = maxi(1, int(ceil(float(total) / float(MAX_SAMPLED_VERTICES))))
@@ -290,10 +364,10 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 		var mesh_transform := mesh_node.transform
 		var bind_map := _bind_map(skin, skeleton)
 		for surface in mesh_node.mesh.get_surface_count():
-			var arrays := mesh_node.mesh.surface_get_arrays(surface)
-			var vertices = arrays[Mesh.ARRAY_VERTEX]
-			var skin_bones = arrays[Mesh.ARRAY_BONES]
-			var skin_weights = arrays[Mesh.ARRAY_WEIGHTS]
+			var extracted := _extract(mesh_node.mesh, surface)
+			var vertices = extracted.vertices
+			var skin_bones = extracted.bones
+			var skin_weights = extracted.weights
 			if vertices == null or skin_bones == null or skin_weights == null:
 				continue
 			var vertex_count: int = (vertices as PackedVector3Array).size()
@@ -301,8 +375,18 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 				continue
 			var stride: int = maxi(1, int(skin_bones.size()) / vertex_count)
 			for vertex in range(0, vertex_count, step):
-				var picked_bone := [-1, -1, -1, -1]
-				var picked_weight := [0.0, 0.0, 0.0, 0.0]
+				# The four heaviest influences, kept in descending order by
+				# scalar locals. A per-vertex array pair here allocated twice
+				# for every sampled vertex of every rig, which made measuring a
+				# body cost tens of milliseconds the first time it bled.
+				var bone_a := -1
+				var bone_b := -1
+				var bone_c := -1
+				var bone_d := -1
+				var weight_a := 0.0
+				var weight_b := 0.0
+				var weight_c := 0.0
+				var weight_d := 0.0
 				var total_weight := 0.0
 				for slot in stride:
 					var weight: float = skin_weights[vertex * stride + slot]
@@ -313,25 +397,33 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 					var resolved := -1
 					if skin_bone >= 0 and skin_bone < bind_map.size():
 						resolved = bind_map[skin_bone]
-					var target := -1
-					for candidate in 4:
-						if weight > float(picked_weight[candidate]):
-							target = candidate
-							break
-					if target < 0:
-						continue
-					for shift in range(3, target, -1):
-						picked_bone[shift] = picked_bone[shift - 1]
-						picked_weight[shift] = picked_weight[shift - 1]
-					picked_bone[target] = resolved
-					picked_weight[target] = weight
+					if weight > weight_a:
+						bone_d = bone_c; weight_d = weight_c
+						bone_c = bone_b; weight_c = weight_b
+						bone_b = bone_a; weight_b = weight_a
+						bone_a = resolved; weight_a = weight
+					elif weight > weight_b:
+						bone_d = bone_c; weight_d = weight_c
+						bone_c = bone_b; weight_c = weight_b
+						bone_b = resolved; weight_b = weight
+					elif weight > weight_c:
+						bone_d = bone_c; weight_d = weight_c
+						bone_c = resolved; weight_c = weight
+					elif weight > weight_d:
+						bone_d = resolved; weight_d = weight
 				if total_weight <= 0.0:
 					continue
 				positions.append(mesh_transform \
 					* (vertices as PackedVector3Array)[vertex])
-				for slot in 4:
-					bones.append(int(picked_bone[slot]))
-					weights.append(float(picked_weight[slot]) / total_weight)
+				var inverse := 1.0 / total_weight
+				bones.append(bone_a)
+				bones.append(bone_b)
+				bones.append(bone_c)
+				bones.append(bone_d)
+				weights.append(weight_a * inverse)
+				weights.append(weight_b * inverse)
+				weights.append(weight_c * inverse)
+				weights.append(weight_d * inverse)
 	# Profiles are built from each vertex's dominant bone plus the garment layers
 	# that continue along the same chain, which is cheap; the whole-garment sample
 	# below is what corrects a splash onto the outermost layer in the current pose.
@@ -528,6 +620,7 @@ static func _primitive_list(meshes: Array) -> Array:
 		primitives.append({
 			"kind": "primitive",
 			"node": mesh_node,
+			"name": str(mesh_node.name),
 			"center": box.get_center(),
 			"half": box.size * 0.5,
 			"radius": box.size.length() * 0.25,

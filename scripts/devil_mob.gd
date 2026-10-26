@@ -255,7 +255,7 @@ func _physics_process(delta: float) -> void:
 	_apply_presentation(nearest)
 	# Think on this mob's stride. The tick integrates the time it skipped, so
 	# speeds, cooldowns and state timers stay in real time.
-	var stride := MobLod.stride_for(nearest)
+	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
 	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
 		return
 	if stride != _lod_stride:
@@ -820,3 +820,12 @@ func _read_profile() -> void:
 	_body_height = float(profile.get("height", 1.8))
 	_sight = float(profile.get("sight", 0.0))
 	_aim = float(profile.get("aim", 1.0))
+
+
+## True while this mob is in, or about to start, a swing: the window a player
+## reads, and the only one that needs the fine think rate. A body that is
+## merely past its cooldown but out of reach is still only orbiting.
+func _attack_ready(distance: float) -> bool:
+	if state == "WINDUP" or state == "STRIKE" or state == "RECOVER":
+		return true
+	return _attack_cooldown <= 0.0 and distance <= _reach + 1.15

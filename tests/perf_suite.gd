@@ -62,6 +62,9 @@ var _no_grass := false
 ## Shadow draw distance override: the sun's coverage is the single biggest
 ## lever on draw calls.
 var _shadow_distance := 0.0
+## Viewport anti-aliasing level, so its cost can be priced. -1 leaves the
+## project setting alone.
+var _msaa := -1
 ## Runs the suite against a tree from before the optimisation work, whose mobs
 ## own their physics step and whose snapshots are dictionaries. The same file
 ## runs on both sides so the two numbers are directly comparable.
@@ -97,6 +100,8 @@ func _initialize() -> void:
 			_legacy = text.substr(9).to_int() != 0
 		elif text.begins_with("--budget="):
 			_budget_ms = maxf(0.0, text.substr(9).to_float())
+		elif text.begins_with("--msaa="):
+			_msaa = text.substr(7).to_int()
 		elif text.begins_with("--shadowdist="):
 			_shadow_distance = text.substr(13).to_float()
 		elif text.begins_with("--nograss="):
@@ -414,6 +419,8 @@ func _apply_render_cuts() -> void:
 	if _no_shadow:
 		for light in root.find_children("*", "DirectionalLight3D", true, false):
 			(light as DirectionalLight3D).shadow_enabled = false
+	if _msaa >= 0:
+		root.get_viewport().msaa_3d = _msaa
 	if _shadow_distance > 0.0:
 		for light in root.find_children("*", "DirectionalLight3D", true, false):
 			(light as DirectionalLight3D).directional_shadow_max_distance = _shadow_distance

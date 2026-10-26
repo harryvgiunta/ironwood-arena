@@ -298,7 +298,7 @@ func _physics_process(delta: float) -> void:
 		return
 	var nearest := _lod_distance()
 	_apply_presentation(nearest)
-	var stride := MobLod.stride_for(nearest)
+	var stride := MobLod.stride_for(nearest, _attack_ready(nearest))
 	if not MobLod.due(Engine.get_physics_frames(), _lod_phase, stride):
 		return
 	if stride != _lod_stride:
@@ -782,3 +782,11 @@ func _apply_presentation(distance: float) -> void:
 	_body.visible = live
 	if is_instance_valid(rig):
 		rig.set_physics_process(live)
+
+
+## True while this clone is in, or about to start, an attack.
+func _attack_ready(distance: float) -> bool:
+	if _swing_pending or state == "STRIKE" or state == "SHOOT":
+		return true
+	var reach := float(rig.melee_reach("right")) + 1.0 if is_instance_valid(rig) else 3.0
+	return _attack_cooldown <= 0.0 and distance <= maxf(reach, 10.0)
