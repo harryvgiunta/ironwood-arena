@@ -43,6 +43,10 @@ static var scopes := true
 static var frames := 0
 ## Wall time of every measured frame, keyed `frame:<label>`.
 static var frame_us := 0
+## Every measured frame's wall time. The average is dragged around by the
+## spikes a scene change or a spawn causes; the median is what a player sits
+## at, and it is what the published numbers quote.
+static var frame_samples := PackedInt64Array()
 static var frame_peak_us := 0
 static var _last_tick := 0
 ## Frames that began while a scope from the previous frame was still open. A
@@ -65,6 +69,7 @@ static func reset() -> void:
 	_depth = 0
 	frames = 0
 	imbalanced = 0
+	frame_samples = PackedInt64Array()
 	frame_us = 0
 	frame_peak_us = 0
 	_last_tick = 0
@@ -128,6 +133,8 @@ static func tick() -> void:
 		var spent := now - _last_tick
 		frames += 1
 		frame_us += spent
+		if frame_samples.size() < 8192:
+			frame_samples.append(spent)
 		if spent > frame_peak_us:
 			frame_peak_us = spent
 	_last_tick = now
@@ -162,9 +169,9 @@ static func report(title: String, budget_us: int = 0) -> String:
 	var lines := PackedStringArray()
 	lines.append("")
 	lines.append("=== %s ===" % title)
-	lines.append("frames=%d  avg frame=%.2f ms  worst frame=%.2f ms  imbalanced=%d" % [
-		frames, float(frame_us) / float(scale) / 1000.0, float(frame_peak_us) / 1000.0,
-		imbalanced])
+	lines.append("frames=%d  median frame=%.2f ms  avg frame=%.2f ms  worst frame=%.2f ms  imbalanced=%d" % [
+		frames, _median_ms(), float(frame_us) / float(scale) / 1000.0,
+		float(frame_peak_us) / 1000.0, imbalanced])
 	if count == 0:
 		lines.append("(no scopes: frame clock only)")
 		lines.append("")
@@ -202,3 +209,11 @@ static func rows() -> Array:
 			"peak_us": _peak[slot],
 		})
 	return out
+
+
+static func _median_ms() -> float:
+	if frame_samples.is_empty():
+		return 0.0
+	var sorted := frame_samples.duplicate()
+	sorted.sort()
+	return float(sorted[sorted.size() / 2]) / 1000.0

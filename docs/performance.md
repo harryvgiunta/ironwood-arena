@@ -344,27 +344,29 @@ bodies existing at all. The physics server is not among them: kept bodies cost
 ## The budget, itemised
 
 A frontier frame, one ranger and seventy-five monsters, scopes off, medians of
-three:
+three, with each figure measured rather than inferred:
 
-| | ms | share |
+| | ms | how it was measured |
 | --- | --- | --- |
-| World, ranger and loop, no mobs (`--nomobs`) | 0.75 | 42% |
-| The seventy-five mobs | 1.04 | 58% |
-| **Total** | **1.79** | |
+| World, ranger and loop, no mobs | 0.75 | every mob freed |
+| The thirty-four rigs that are in view | 0.23 | every rig freed, bodies left running |
+| The mobs' own script | 0.21 | the scoped runs |
+| Everything else the seventy-five bodies cost | ~0.55 | the remainder |
+| **Total** | **1.77** | |
 
-Per body that is **14.7 µs a frame**, of which the scoped runs attribute about
-3.5 µs to the mob's own script (state machines, sight, spacing, the per-frame
-distance pass) and the rest to having seventy-five monster-shaped objects in
-the scene at all. A bare `CharacterBody3D` with a collision shape measures
-**0.41 µs**, so it is not the physics body: it is the scripted node, its rig
-where one is still attached, and the work between.
+The surprise is the second row. A monster's animated rig — clip, skeleton,
+three skinned meshes — is **6.7 µs a frame**, not the twenty-eight the earlier
+report assumed; freeing every rig on the frontier moves the frame by 0.23 ms.
+The mob cost is diffuse: no single line item is worth chasing, which is why
+each of the experiments below returned five hundredths of a millisecond.
 
-That leaves the target in an awkward place. Ninety percent of the original
-9.14 ms is **0.91 ms** — above the empty world's 0.75 ms, so it is not
-impossible, but it leaves **0.16 ms for every monster in the frontier**, or
-about 2 µs a body at seventy-five of them. The current model spends 14.7 µs a
-body and no amount of tuning closes a factor of seven; it is the shape of the
-object that has to change.
+Per body across all seventy-five that is 13.6 µs, against 0.41 µs for a bare
+`CharacterBody3D`: the difference is the scripted node, its tick, its
+presentation bookkeeping and its rig.
+
+Ninety percent of the original 9.14 ms is **0.91 ms**, which leaves **0.16 ms
+for every monster** — about 2 µs a body. Nothing in this model reaches that by
+tuning; every path to it is a different shape of object.
 
 ## What is left
 
