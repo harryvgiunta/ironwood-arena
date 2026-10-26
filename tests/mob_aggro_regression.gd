@@ -124,9 +124,9 @@ func _check_memory_floor(player: CharacterBody3D) -> void:
 	# The ranger leaves the cone entirely; only the memory is left.
 	player.global_position = Vector3(0.0, 0.0, 60.0)
 	for tick in 29:
-		mob._senses.step(mob, hidden, 0.5, 30.0, 1.7, Callable(mob, "_is_hostile"))
+		mob._senses.step(mob, hidden, 0.5, 30.0, 1.7, mob.safe_center)
 	check(bool(mob._senses.aggressive()), "the pursuit survives 14.5 s without sight")
-	mob._senses.step(mob, hidden, 0.5, 30.0, 1.7, Callable(mob, "_is_hostile"))
+	mob._senses.step(mob, hidden, 0.5, 30.0, 1.7, mob.safe_center)
 	check(not bool(mob._senses.aggressive()),
 		"the pursuit ends after the 15 s memory, never earlier")
 	_clear(mob)

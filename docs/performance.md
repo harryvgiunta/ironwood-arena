@@ -178,6 +178,14 @@ cannot know what they can see. Ranger clones are exempt outright: the bow draw
 they time their release against lives in their rig, so a clone keeps animating
 even when the camera has left it (the suite caught exactly that).
 
+### The sight pass runs its own hostility rule
+
+Every candidate a mob considered went through a `Callable` back into the mob's
+`_is_hostile`, once per candidate per tick — a dynamic dispatch to re-evaluate a
+rule that is identical for every family (alive, and outside the town ring). The
+rule lives in `MobSenses` now and the callable is gone. It is worth a few
+percent of the sight pass and one fewer way for the two families to drift apart.
+
 ### Bodies nobody can see are not ticked
 
 A mob's own tick costs it about six microseconds a frame before it decides

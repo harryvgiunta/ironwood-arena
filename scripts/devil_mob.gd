@@ -300,7 +300,7 @@ func _physics_process(delta: float) -> void:
 	Perf.end()
 	Perf.begin("mob.senses")
 	var pursuit := _senses.step(self, candidates, delta, _sight_range(),
-		_eye_height(), Callable(self, "_is_hostile"))
+		_eye_height(), safe_center)
 	Perf.end()
 	Perf.begin("mob.target")
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()

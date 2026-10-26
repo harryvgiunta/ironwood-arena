@@ -311,7 +311,7 @@ func _physics_process(delta: float) -> void:
 	# cinder devil exactly as they do for the newer mob families.
 	Perf.begin("mob.senses")
 	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
-		_eye_height(), Callable(self, "_is_hostile"))
+		_eye_height(), safe_center)
 	Perf.end()
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
 	if not is_instance_valid(_target) and not pursuit:

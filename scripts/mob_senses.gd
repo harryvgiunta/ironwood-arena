@@ -69,10 +69,13 @@ func focus() -> Vector3:
 
 
 ## One AI tick. Refreshes the pursuit timer, looks for the nearest visible
-## candidate and returns whether the mob is aggressive. `accept` is an optional
-## per-candidate filter (the mobs pass their safe-ring rule).
+## candidate and returns whether the mob is aggressive. `safe_center` is the
+## town's ring: a ranger inside it is never a candidate. That rule used to be a
+## `Callable` the mobs passed in, which cost a dynamic dispatch per candidate
+## per tick -- more than the sight ray itself, since the rule is the same for
+## every family and a sight ray here is under two microseconds.
 func step(owner: Node3D, candidates: Array, delta: float, sight_range: float,
-		eye_height: float, accept := Callable()) -> bool:
+		eye_height: float, safe_center: Vector3) -> bool:
 	memory = maxf(0.0, memory - delta)
 	seen = false
 	if not is_instance_valid(owner) or sight_range <= 0.0:
@@ -82,14 +85,12 @@ func step(owner: Node3D, candidates: Array, delta: float, sight_range: float,
 	var best_distance := INF
 	# Keep the remembered target if it is still in view, then let any nearer
 	# visible body take over.
-	if is_instance_valid(target) and _accepted(target, accept) \
+	if is_instance_valid(target) and _hostile(target, safe_center) \
 			and can_see(owner, target, sight_range, eye_height):
 		best = target
 		best_distance = owner.global_position.distance_squared_to(target.global_position)
 	for candidate in candidates:
-		if not is_instance_valid(candidate) or candidate == best:
-			continue
-		if not _accepted(candidate, accept):
+		if candidate == best or not _hostile(candidate, safe_center):
 			continue
 		if not can_see(owner, candidate, sight_range, eye_height):
 			continue
@@ -103,7 +104,7 @@ func step(owner: Node3D, candidates: Array, delta: float, sight_range: float,
 		memory = MEMORY_SECONDS
 		seen = true
 		return true
-	if not is_instance_valid(target) or not _accepted(target, accept):
+	if not is_instance_valid(target) or not _hostile(target, safe_center):
 		clear()
 		return false
 	return memory > 0.0
@@ -156,12 +157,13 @@ func _clear(owner: Node3D, from: Vector3, to: Vector3) -> bool:
 	return owner.get_world_3d().direct_space_state.intersect_ray(_query).is_empty()
 
 
-func _accepted(candidate: Object, accept: Callable) -> bool:
+## The one hostility rule for every family: alive, and outside the town ring.
+static func _hostile(candidate: Object, safe_center: Vector3) -> bool:
 	if not is_instance_valid(candidate):
 		return false
-	if not accept.is_valid():
-		return true
-	return bool(accept.call(candidate))
+	if candidate.get("alive") == false:
+		return false
+	return not in_safe_ring(safe_center, candidate.global_position)
 
 
 static func _fov_cosine() -> float:
