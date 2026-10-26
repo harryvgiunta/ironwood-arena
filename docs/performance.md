@@ -304,6 +304,10 @@ In rough order of payoff, for whoever picks this up:
 
 Measured and dismissed, so nobody repeats them:
 
+- **Hoisting `global_position` out of the mob tick** — the tick used to read its
+  own transform a dozen times and the target's as many again. Threaded through
+  as local arguments it made no measurable difference: mobs are children of the
+  scene root, so the lookup is short. Reverted.
 - **Streaming far bodies out entirely** — freeing every mob past 72 m and
   rebuilding it from a record was built and measured: 25 of 75 bodies slept and
   the frame moved 0.05 ms, because releasing their rigs had already taken the
