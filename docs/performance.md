@@ -41,7 +41,14 @@ Attribution knobs, for finding where a cost actually lives:
 | `--noshadow=1`, `--shadowdist=M` | The sun's shadow pass, or its range. |
 | `--msaa=N` | The viewport's anti-aliasing level. |
 | `--nomobs=1` | Every frontier mob is freed: the world's own frame, which is the floor. |
+| `--noscopes=1` | The frame clock only. A begin/end pair per mob per frame is not free, and the headline numbers are taken this way. |
 | `--legacy=1` | Runs against a tree from before this work, for an A/B. |
+
+**Two modes, used for different things.** Scopes *on* for attribution — every
+table in this file came from a scoped run. Scopes *off* (`--noscopes=1`) for
+the headline frame times, because the profiler itself costs about **0.11 ms,
+5.6% of a frontier frame**, mostly from the per-mob scopes. Mixing the two
+overstates the game.
 
 `--headless` uses a dummy renderer, which is exactly what the CPU half of the
 frame is; drop it to include rendering. Compare like with like: the draw-call
@@ -283,8 +290,8 @@ between 2.00 and 2.50 ms across runs.
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
 | Headless, frontier idle | 9.14 ms | 1.85 ms | −80% |
-| Headless, 175 mobs fighting | 36.13 ms | 7.8 ms | −78% |
-| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.36 ms | −67% |
+| Headless, 175 mobs fighting | 36.13 ms | 7.51 ms | −79% |
+| Windowed (GTX 1080), frontier idle | 19.14 ms | 6.37 ms | −67% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |
@@ -318,45 +325,36 @@ bodies existing at all. The physics server is not among them: kept bodies cost
 
 ## The budget, itemised
 
-A frontier frame, one ranger and seventy-five monsters, headless (all medians,
-walls between runs are ±8%):
+A frontier frame, one ranger and seventy-five monsters, scopes off, medians of
+three:
 
 | | ms | share |
 | --- | --- | --- |
-| World, ranger and loop, no mobs (`--nomobs`) | 0.92 | 50% |
-| Mobs — the twenty near the player, mostly | 0.93 | 50% |
+| World, ranger and loop, no mobs (`--nomobs`) | 0.75 | 41% |
+| The seventy-five mobs | 1.10 | 59% |
 | **Total** | **1.85** | |
 
-Inside the mob half, at 15 Hz decisions close by and 2 Hz far: the state
-machines 0.11, the per-frame distance/presentation pass 0.07, spacing 0.04,
-motion 0.03, animation 0.03, the legacy wolf/devil and the clones 0.04, and
-about 0.6 ms of Godot's own per-body cost for seventy-five scripted
-`CharacterBody3D`s.
+Per body that is **14.7 µs a frame**, of which the scoped runs attribute about
+3.5 µs to the mob's own script (state machines, sight, spacing, the per-frame
+distance pass) and the rest to having seventy-five monster-shaped objects in
+the scene at all. A bare `CharacterBody3D` with a collision shape measures
+**0.41 µs**, so it is not the physics body: it is the scripted node, its rig
+where one is still attached, and the work between.
 
-That last line is why the target is out of reach by tuning: it is the price of
-a monster *existing*, and it is the same whether the body is fighting or
-standing at home.
+That leaves the target in an awkward place. Ninety percent of the original
+9.14 ms is **0.91 ms** — above the empty world's 0.75 ms, so it is not
+impossible, but it leaves **0.16 ms for every monster in the frontier**, or
+about 2 µs a body at seventy-five of them. The current model spends 14.7 µs a
+body and no amount of tuning closes a factor of seven; it is the shape of the
+object that has to change.
 
 ## What is left
 
-### Where the budget actually is
-
-Freeing every frontier mob leaves **0.92 ms** — the world, the ranger and the
-loop. The seventy-five mobs cost the rest: **1.91 ms** before rigs were
-released and **1.35 ms** after, which is **18 µs per body per frame** — about
-12 µs of script and the remainder engine, now that only the bodies in view
-carry a rig.
-
-That is the whole picture, and it has a blunt consequence: `main`'s frame was
-9.14 ms, so a ninety percent cut is 0.91 ms — **the world's cost with no mobs
-in it at all**. Hitting it by optimising mobs one at a time is not reachable
-however far the per-mob cost falls; it needs a cheaper *model* of a mob.
-
 In rough order of payoff, for whoever picks this up:
 
-- **Stop paying for a body to exist at all.** Releasing distant rigs recovered
-  the skinned half; what is left is the physics body and the scene node
-  (roughly 6 µs of the 18).
+- **Stop paying 14.7 µs a body.** Releasing distant rigs recovered the skinned
+  half; the floor for a bare body here is 0.41 µs, so the rest is the scripted
+  node and what surrounds it.
 - **A cheaper mob model altogether** — instanced or aggregate bodies for the
   rank and file, with full nodes only for the ones in reach. This is what a
   ninety percent cut actually looks like.

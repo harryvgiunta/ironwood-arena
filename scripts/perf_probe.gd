@@ -34,6 +34,11 @@ static var _depth := 0
 ## Master switch. `Perf` (autoload-free) is enabled by the harness or by the
 ## `IRONWOOD_PERF` environment variable, never by normal play.
 static var enabled := false
+## Whether the scopes themselves run. Kept separate from `enabled` so a
+## benchmark can measure the game with the frame clock still running: a
+## begin/end pair per mob per frame is not free, and publishing a number that
+## includes the profiler's own cost would be dishonest.
+static var scopes := true
 ## Frames the samples cover; the report divides by this to get a per-frame cost.
 static var frames := 0
 ## Wall time of every measured frame, keyed `frame:<label>`.
@@ -74,7 +79,7 @@ static func _slot(name: String) -> int:
 
 
 static func begin(name: String) -> void:
-	if not enabled:
+	if not enabled or not scopes:
 		return
 	if _depth >= _open_name.size():
 		_open_name.resize(_depth + 16)
@@ -87,7 +92,7 @@ static func begin(name: String) -> void:
 
 
 static func end() -> void:
-	if not enabled or _depth <= 0:
+	if not enabled or not scopes or _depth <= 0:
 		return
 	_depth -= 1
 	var spent := Time.get_ticks_usec() - _open_start[_depth]
@@ -139,8 +144,6 @@ static func summary(prefix: String) -> String:
 ## percentages are taken against; pass 0 to use the measured frame average.
 static func report(title: String, budget_us: int = 0) -> String:
 	var count := _names.size()
-	if count == 0:
-		return "%s: no samples\n" % title
 	var order := range(count)
 	order.sort_custom(func(a: int, b: int) -> bool: return _total[a] > _total[b])
 	var scale := frames if frames > 0 else 1
@@ -152,6 +155,10 @@ static func report(title: String, budget_us: int = 0) -> String:
 	lines.append("=== %s ===" % title)
 	lines.append("frames=%d  avg frame=%.2f ms  worst frame=%.2f ms" % [
 		frames, float(frame_us) / float(scale) / 1000.0, float(frame_peak_us) / 1000.0])
+	if count == 0:
+		lines.append("(no scopes: frame clock only)")
+		lines.append("")
+		return "\n".join(lines)
 	lines.append("%-26s %10s %9s %8s %10s %9s %8s" % [
 		"scope", "total ms", "ms/frame", "share", "calls", "calls/fr", "peak µs"])
 	lines.append("-".repeat(88))
