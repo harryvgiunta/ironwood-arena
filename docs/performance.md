@@ -297,16 +297,45 @@ between 2.00 and 2.50 ms across runs.
 The frame rate that matters to a player — the windowed frontier — went from
 **52 fps to about 153 fps**.
 
-Three suites fail on `main` as well as here, and are not regressions:
-`devil_regression` (2: the cinder devil's death clip and corpse head drop),
-`corpse_regression` (1: the procedural delve devil killed in the air) and
-`network_input_regression` (27).
+### Certified suites
+
+All forty-seven suites were run against the tree the numbers above were taken
+from:
+
+| Clean | Pre-existing failures |
+| --- | --- |
+| 44 suites, ~34,000 checks | `devil_regression` 78/80, `corpse_regression` 69/70, `network_input_regression` |
+
+Those three fail identically on unmodified `main` and are not regressions: the
+cinder devil's death clip and corpse head drop, the procedural delve devil
+killed in the air, and the arena's four-process input suite.
 
 At 175 mobs fighting, the largest remaining costs are the state machines and
 sight rays of the bodies in reach (about 4 ms), the rigs of the bodies inside
 the animation range (about 1.7 ms), and the cost of a hundred and seventy-five
 bodies existing at all. The physics server is not among them: kept bodies cost
 0.05 ms.
+
+## The budget, itemised
+
+A frontier frame, one ranger and seventy-five monsters, headless (all medians,
+walls between runs are ±8%):
+
+| | ms | share |
+| --- | --- | --- |
+| World, ranger and loop, no mobs (`--nomobs`) | 0.92 | 50% |
+| Mobs — the twenty near the player, mostly | 0.93 | 50% |
+| **Total** | **1.85** | |
+
+Inside the mob half, at 15 Hz decisions close by and 2 Hz far: the state
+machines 0.11, the per-frame distance/presentation pass 0.07, spacing 0.04,
+motion 0.03, animation 0.03, the legacy wolf/devil and the clones 0.04, and
+about 0.6 ms of Godot's own per-body cost for seventy-five scripted
+`CharacterBody3D`s.
+
+That last line is why the target is out of reach by tuning: it is the price of
+a monster *existing*, and it is the same whether the body is fighting or
+standing at home.
 
 ## What is left
 
