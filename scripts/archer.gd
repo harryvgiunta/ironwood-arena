@@ -1345,6 +1345,9 @@ func aim_at(world_point: Vector3) -> void:
 		_update_pose(0.0)
 
 func set_roll(progress: float, direction: Vector3) -> void:
+	# See `set_step`: an unchanged "not rolling" must not rebuild the pose.
+	if progress < 0.0 and _roll_progress < 0.0:
+		return
 	_roll_progress = progress
 	if progress >= 0.0:
 		global_basis = Basis(Vector3.UP,atan2(-direction.x,-direction.z))
@@ -1359,6 +1362,11 @@ func set_hit_react(seconds: float) -> void:
 	_update_pose(0.0)
 
 func set_step(progress: float, direction: Vector3) -> void:
+	# The tick reports "not stepping" every frame. Rebuilding the pose for an
+	# unchanged state was a tenth of a millisecond a frame; the animation clock
+	# already refreshes the pose, so only a real change needs to force one.
+	if progress < 0.0 and _step_progress < 0.0:
+		return
 	_step_progress = clampf(progress,0.0,1.0) if progress >= 0.0 else -1.0
 	if _step_progress >= 0.0:
 		var planar := Vector3(direction.x,0.0,direction.z)
