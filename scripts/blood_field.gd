@@ -56,8 +56,20 @@ func _ready() -> void:
 	_rng.seed = 0xB100D
 	set_process(true)
 
+## Stains live a minute and fade over their last three seconds; there is nothing
+## in this pass that needs sixty hertz. It walks every live stain, wound, burst
+## and pool, which is a hundredth of a millisecond with three hundred of them.
+const FADE_TICK := 0.1
+
+var _fade_elapsed := 0.0
+
+
 func _process(delta: float) -> void:
-	advance(delta)
+	_fade_elapsed += delta
+	if _fade_elapsed < FADE_TICK:
+		return
+	advance(_fade_elapsed)
+	_fade_elapsed = 0.0
 
 # --- public field API ------------------------------------------------------
 
@@ -244,6 +256,7 @@ func clear_all() -> void:
 # --- lifetime --------------------------------------------------------------
 
 func advance(delta: float) -> void:
+	Perf.begin("blood.advance")
 	for index in range(_stains.size() - 1, -1, -1):
 		var stain: Dictionary = _stains[index]
 		var node = stain.node
@@ -268,6 +281,7 @@ func advance(delta: float) -> void:
 	for index in range(_pools.size() - 1, -1, -1):
 		if not is_instance_valid(_pools[index].node):
 			_pools.remove_at(index)
+	Perf.end()
 
 ## True when a world point is inside a live death pool. Pools are flat on the
 ## ground, so the check is a radius in the floor plane plus a height band: a

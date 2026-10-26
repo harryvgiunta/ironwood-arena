@@ -257,6 +257,15 @@ them stalled on every new attacker. Three changes:
 The first bleed of each species still pays for its own measurement; every body
 after it does not.
 
+### The blood field fades at ten hertz
+
+`BloodField.advance` walks every live stain, wound, burst and pool each frame to
+age it, and a busy room holds three hundred of them: 0.088 ms, more than one
+percent of the frame, to fade things that take a minute to fade. It runs ten
+times a second now, with the elapsed time handed in — 0.020 ms. `advance` is
+still public and still takes a delta, so the regression that walks a stain from
+birth to its five-minute pool is unchanged.
+
 ### The status block runs at thirty hertz
 
 `hud.update_status` rewrites six formatted strings and three meters every
