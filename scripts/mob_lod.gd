@@ -34,13 +34,13 @@ const RELEASE_RANGE := 58.0
 const NEAR := 22.0
 const MID := 55.0
 ## Physics ticks between decisions, per tier: 30 Hz in a fight, 15 Hz close by,
-## 7.5 Hz in the middle distance, 2.5 Hz beyond. Movement is *not* tied to
+## 5 Hz in the middle distance, 2 Hz beyond. Movement is *not* tied to
 ## this: a body integrates its last decided velocity every frame, so a coarse
 ## think rate costs nothing visible.
 const STRIDE_ATTACK := 2
 const STRIDE_NEAR := 4
-const STRIDE_MID := 8
-const STRIDE_FAR := 24
+const STRIDE_MID := 12
+const STRIDE_FAR := 48
 
 
 ## `ready` is the mob's own readiness to swing: a body whose cooldown is up, or

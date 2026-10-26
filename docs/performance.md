@@ -116,9 +116,9 @@ an obstacle is nudged onto the nearest open ground.
 `scripts/mob_lod.gd`. Sight, spacing, the state machine and the ground step are
 per-tick costs, and none of them need sixty hertz. A mob that is inside its
 swing window — winding up, striking or recovering, or ready to swing and
-already in reach — thinks every second tick. Everything else thinks every
-fourth tick inside 22 m, every eighth out to 55 m, and every twenty-fourth
-beyond. A decimated tick scales `delta`, so speeds, cooldowns and state timers
+already in reach — thinks every second tick (30 Hz). Everything else thinks
+every fourth tick inside 22 m (15 Hz), every twelfth out to 55 m (5 Hz), and
+every forty-eighth beyond (2 Hz). A decimated tick scales `delta`, so speeds, cooldowns and state timers
 stay in real time.
 
 **Movement is not decimated, and it has its own clock.** A decimated tick
@@ -261,12 +261,12 @@ snapped. The upload is now 152 KB/s and the buffer never empties.
 Medians of three runs; "before" is the same suite against the same scene at
 `main`'s commit. Frame figures move by about eight percent between runs on this
 machine, so treat the last digit as noise; the idle frontier has measured
-between 2.23 and 2.50 ms across runs.
+between 2.00 and 2.50 ms across runs.
 
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
-| Headless, frontier idle | 9.14 ms | 2.24 ms | −75% |
-| Headless, 175 mobs fighting | 36.13 ms | 8.52 ms | −76% |
+| Headless, frontier idle | 9.14 ms | 2.03 ms | −78% |
+| Headless, 175 mobs fighting | 36.13 ms | 7.64 ms | −79% |
 | Windowed (GTX 1080), frontier idle | 19.14 ms | 6.35 ms | −67% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
