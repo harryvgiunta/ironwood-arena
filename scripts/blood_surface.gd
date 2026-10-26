@@ -61,6 +61,14 @@ static func body_for(rig: Node3D) -> Dictionary:
 	return body
 
 
+## The measurement identity of a rig: two rigs with the same key share one
+## measured garment. Callers use it to warm one body per species.
+static func structure_key(rig: Node3D) -> String:
+	if not is_instance_valid(rig):
+		return ""
+	return _species_key(rig, _signature(rig))
+
+
 ## What makes two rigs structurally identical: the same visible skinned meshes
 ## and the same bone count, which is what the measured profiles depend on.
 static func _species_key(rig: Node3D, signature: int) -> String:

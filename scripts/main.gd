@@ -20,6 +20,7 @@ const BackstabAbility = preload("res://scripts/backstab_ability.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const BloodSurface = preload("res://scripts/blood_surface.gd")
 const BloodyFeet = preload("res://scripts/bloody_feet.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -341,6 +342,7 @@ func _ready() -> void:
 		clone.arrow_fired.connect(_on_mob_arrow)
 		enemies.append(clone)
 	Perf.end()
+	_warm_mob_blood()
 	_enemies_by_index = enemies.duplicate()
 	_setup_network()
 	_update_camera(1.0)
@@ -2965,3 +2967,33 @@ func _world_waystone(id: String) -> void:
 	world.activate_interactable(id)
 	audio.play_sound("bullseye")
 	hud.show_feedback("Waystone restored",2.0)
+
+
+## Measures the garment of every species the frontier already fields, once, at
+## load. The first blow on a body measures its rig before blood can be laid on
+## it, which cost twenty to a hundred milliseconds inside the hit; doing it here
+## moves that to a frame nobody is watching.
+func _warm_mob_blood() -> void:
+	Perf.begin("world.warm")
+	# The blood atlas is procedural and built on the first stain; build it now
+	# rather than inside the first blow.
+	BloodFx.soak_material(0)
+	var seen := {}
+	for enemy in enemies:
+		if not is_instance_valid(enemy) or not enemy.has_method("blood_rig"):
+			continue
+		var rig = enemy.blood_rig()
+		if not is_instance_valid(rig):
+			continue
+		# One sample per structure: bodies of the same species share one
+		# measurement anyway, so warming the first warms them all.
+		var key := BloodSurface.structure_key(rig)
+		if key.is_empty() or seen.has(key):
+			continue
+		seen[key] = true
+		Perf.begin("world.warm.species")
+		BloodSurface.body_for(rig)
+		Perf.end()
+	if is_instance_valid(archer):
+		BloodSurface.body_for(archer)
+	Perf.end()

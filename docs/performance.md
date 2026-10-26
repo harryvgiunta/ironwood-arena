@@ -140,6 +140,16 @@ third of a frontier frame.
 fresh array per mob per frame, four milliseconds of the frame. The same pass
 against a square-metre bucket grid reads the nine cells around the body.
 
+### The first blow of a session no longer stalls
+
+Two things were built lazily and paid for in the middle of a fight: the blood
+atlas (procedural, once) and the garment measurement of every species
+(~17 ms each). Both are now built while the world loads — `main._warm_mob_blood`
+touches `BloodFx.soak_material(0)` and measures one body per structure — which
+costs **0.26 s of load** and removes the first-contact stutter: the worst frame
+in a hundred-mob brawl went from **154 ms to 38 ms**, and the first landed blow
+from **135 ms to 28 ms**.
+
 ### A distant body has no rig at all
 
 A skinned body costs about **fourteen microseconds a frame simply by
@@ -214,12 +224,14 @@ machine, so treat the last digit as noise.
 | Scenario | Before | After | Change |
 | --- | --- | --- | --- |
 | Headless, frontier idle | 9.14 ms | 2.28 ms | −75% |
-| Headless, 175 mobs fighting | 36.13 ms | 8.91 ms | −75% |
+| Headless, 175 mobs fighting | 36.13 ms | 8.54 ms | −76% |
 | Windowed (GTX 1080), frontier idle | 19.14 ms | 6.88 ms | −64% |
 | Draw calls | 3490 | 1940 | −44% |
 | Primitives | 1.30 M | 0.87 M | −33% |
 | Adding one monster | 1.36 ms | ~1.1 ms | −20% |
-| The first blow that lands on a body | 20-37 ms | ~3 ms after the species' first | |
+| The first blow of a session | 135 ms | 28 ms | −79% |
+| The first blow after that | 20-37 ms | ~3 ms | −90% |
+| Worst frame, 175 mobs fighting | 154 ms | 38 ms | −75% |
 | Host upload, 133 mobs | 507 KB/s | 152 KB/s | −70% |
 
 The frame rate that matters to a player — the windowed frontier — went from
