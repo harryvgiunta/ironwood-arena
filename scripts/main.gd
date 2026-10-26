@@ -599,7 +599,9 @@ func _physics_process(delta: float) -> void:
 	var was_in_cover: bool = cover.active
 	_update_combat_cover_side()
 	combat.face_block(Vector3(-sin(camera_yaw),0,-cos(camera_yaw)))
+	Perf.begin("player.cover")
 	var covered_velocity: Vector3 = cover.step(delta,direction,_peek_requested or combat.wants_cover_exposure(),combat.cover_side,running)
+	Perf.end()
 	if was_in_cover:
 		player.velocity.x = covered_velocity.x
 		player.velocity.z = covered_velocity.z
@@ -641,7 +643,9 @@ func _physics_process(delta: float) -> void:
 		roll.takeoff_pending = false
 	_jump_requested = false
 	var previous_position := player.global_position
+	Perf.begin("player.slide")
 	player.move_and_slide()
+	Perf.end()
 	var limit: float = world.WORLD_LIMIT - 2.0
 	player.position.x = clampf(player.position.x, -limit, limit)
 	player.position.z = clampf(player.position.z, -limit, limit)
@@ -649,8 +653,10 @@ func _physics_process(delta: float) -> void:
 	_ability_path_strike(ability)
 	var actual_velocity := (player.global_position - previous_position) / maxf(delta, 0.0001)
 	slide.after_move(player,actual_velocity)
+	Perf.begin("player.loot")
 	_collect_loot(delta)
 	_bloody_feet.update(delta,player,archer)
+	Perf.end()
 	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	archer.set_step(step.progress if step.active else -1.0,step.direction)
@@ -659,7 +665,9 @@ func _physics_process(delta: float) -> void:
 	combat.set_motion(actual_velocity, running or roll.active or slide.active or step.active, player.is_on_floor() and not roll.active)
 	if _mouse_drawing or _throw_held or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
+	Perf.begin("player.combat")
 	combat.advance(delta)
+	Perf.end()
 	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
 		_enter_delve()
 	elif player.position.y < -25.0:

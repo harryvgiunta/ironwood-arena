@@ -60,7 +60,8 @@ Reported scopes:
 
 | Scope | What it wraps |
 | --- | --- |
-| `main.physics` | `main.gd`'s tick. |
+| `main.physics`, `main.process` | `main.gd`'s physics and idle ticks. |
+| `player.slide`, `player.cover`, `player.combat`, `player.loot` | The parts of the player's tick: the body step, cover, combat, and the loot and footfall pass. |
 | `rig` | The ranger rig's animation sampling. |
 | `mob.ai`, `legacy.ai`, `clone.ai` | One tick of each mob family's brain. |
 | `mob.senses`, `mob.state`, `mob.separate`, `mob.drive`, `mob.slide`, `mob.steer`, `mob.visual` | The parts of that tick: sight, the state machine, spacing, steering, the ground step and presentation. |
